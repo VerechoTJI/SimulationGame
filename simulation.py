@@ -7,6 +7,7 @@ from perlin_noise import PerlinNoise
 import threading
 import queue
 import sys
+import traceback
 
 # --- Platform-specific modules for non-blocking input ---
 try:
@@ -25,7 +26,7 @@ except ImportError:
 # --- Game Configuration ---
 GRID_WIDTH = 64
 GRID_HEIGHT = 32
-TICK_SECONDS = 3
+TICK_SECONDS = 1
 TILE_SIZE_METERS = 10
 CLEAR_METHOD = (
     "ansi"  # Use 'ansi' for modern terminals (PowerShell/Linux/macOS) for no flicker.
@@ -208,7 +209,7 @@ class Human(Entity):
         # Interaction (Harvesting) logic
         for entity in world.entities:
             if isinstance(entity, Rice) and entity.matured:
-                if np.linalg.norm(self.position - entity.position) <= 1.0:
+                if np.linalg.norm(self.position - entity.position) <= 10.0:
                     world.add_log(
                         f"{Colors.YELLOW}{self.name} harvested and replanted {entity.name}.{Colors.RESET}"
                     )
@@ -294,6 +295,76 @@ class World:
                 f"{Colors.RED}Unknown entity type: {entity_type}{Colors.RESET}"
             )
 
+    def find_path(self, start_pos, end_pos):
+        """
+        Finds a path from start_pos to end_pos using A* algorithm.
+        Positions are in grid coordinates (e.g., (x, y)).
+        """
+
+        def get_move_cost(grid_pos):
+            tile = self.grid[grid_pos[1]][grid_pos[0]]
+            # Inverse of speed factor. Water (0) is infinite cost.
+            if tile.tile_move_speed_factor == 0:
+                return float("inf")
+            return 1.0 / tile.tile_move_speed_factor
+
+        start_node = (start_pos[0], start_pos[1])
+        end_node = (end_pos[0], end_pos[1])
+
+        # A* requires a priority queue (min-heap) for the open set
+        open_set = []
+        heapq.heappush(open_set, (0, start_node))  # (f_score, node)
+
+        came_from = {}
+        g_score = {start_node: 0}  # Cost from start to current node
+        f_score = {
+            start_node: np.linalg.norm(np.array(start_node) - np.array(end_node))
+        }  # g_score + heuristic
+
+        while open_set:
+            current = heapq.heappop(open_set)[1]
+
+            if current == end_node:
+                # Reconstruct path
+                path = []
+                while current in came_from:
+                    path.append(current)
+                    current = came_from[current]
+                return path[::-1]  # Return reversed path
+
+            # Check neighbors (including diagonals)
+            for dx in [-1, 0, 1]:
+                for dy in [-1, 0, 1]:
+                    if dx == 0 and dy == 0:
+                        continue
+
+                    neighbor = (current[0] + dx, current[1] + dy)
+
+                    if not (
+                        0 <= neighbor[0] < self.width and 0 <= neighbor[1] < self.height
+                    ):
+                        continue
+
+                    move_cost = get_move_cost(neighbor)
+                    if move_cost == float("inf"):
+                        continue  # Impassable terrain
+
+                    tentative_g_score = g_score[current] + (
+                        move_cost * (1.414 if dx != 0 and dy != 0 else 1.0)
+                    )
+
+                    if tentative_g_score < g_score.get(neighbor, float("inf")):
+                        came_from[neighbor] = current
+                        g_score[neighbor] = tentative_g_score
+                        heuristic = np.linalg.norm(
+                            np.array(neighbor) - np.array(end_node)
+                        )
+                        f_score[neighbor] = tentative_g_score + heuristic
+                        if neighbor not in [i[1] for i in open_set]:
+                            heapq.heappush(open_set, (f_score[neighbor], neighbor))
+
+        return None  # No path found
+
     def game_tick(self):
         # ... (unchanged, but now uses add_log)
         self.tick_count += 1
@@ -308,9 +379,8 @@ class World:
                 )
                 self.entities.remove(entity)
 
-    def display(self, current_input):
-        """Clears the screen using the configured method and draws the world state."""
-        # Build the entire screen content into a buffer first
+    def display(self, current_input_list, cursor_pos):
+        """Clears the screen and draws the world state, including a visible cursor."""
         output_buffer = []
 
         display_grid = [
@@ -336,20 +406,29 @@ class World:
         for msg in self.log_messages:
             output_buffer.append(msg)
         for _ in range(10 - len(self.log_messages)):
-            output_buffer.append(
-                ""
-            )  # Pad with blank lines to prevent old text from lingering
-        output_buffer.append(f"> {current_input}")
+            output_buffer.append("")
 
-        # Join the buffer into a single string
+        # --- NEW CURSOR DRAWING LOGIC ---
+        prompt_parts = ["> "]
+        for i, char in enumerate(current_input_list):
+            if i == cursor_pos:
+                # Render the character under the cursor with an inverted background
+                prompt_parts.append(f"\033[7m{char}\033[27m")  # Invert/Revert colors
+            else:
+                prompt_parts.append(char)
+
+        # If cursor is at the end of the line, show it as an inverted space
+        if cursor_pos == len(current_input_list):
+            prompt_parts.append(f"\033[7m \033[27m")
+
+        output_buffer.append("".join(prompt_parts))
+        # --- END OF NEW LOGIC ---
+
         final_output = "\n".join(output_buffer)
 
-        # Clear the screen using the selected method and print
         if CLEAR_METHOD == "ansi":
-            # \033[H moves cursor to top-left. \033[J clears screen from cursor down.
-            # This is the standard for flicker-free updates.
             sys.stdout.write("\033[H\033[J" + final_output)
-        else:  # 'cls'
+        else:
             os.system("cls")
             sys.stdout.write(final_output)
 
@@ -358,11 +437,11 @@ class World:
 
 # --- Main Game Loop and Input Handling ---
 def game_loop(world, command_queue, shared_state):
-    """The main game thread, now with a crash handler for debugging."""
+    """The main game thread, with a universal crash handler for debugging."""
     last_tick_time = time.time()
 
     while True:
-        try:  # --- START OF CRASH HANDLER BLOCK ---
+        try:  # --- START OF UNIVERSAL CATCH BLOCK ---
             # Check for commands from the input thread
             try:
                 command = command_queue.get_nowait()
@@ -376,7 +455,7 @@ def game_loop(world, command_queue, shared_state):
                         f"{Colors.RED}Unknown command: '{command}'{Colors.RESET}"
                     )
             except (queue.Empty, ValueError, IndexError):
-                pass  # Ignore bad commands or empty queue
+                pass
 
             # Check if it's time for a game logic tick
             current_time = time.time()
@@ -384,177 +463,111 @@ def game_loop(world, command_queue, shared_state):
                 world.game_tick()
                 last_tick_time = current_time
 
-            # Get the current input from the shared state to display it
+            # Get the current input state to display it
             with shared_state["lock"]:
-                current_input_str = "".join(shared_state["input_buffer"])
+                current_input_list = list(shared_state["input_buffer"])
+                cursor_pos = shared_state["cursor_pos"]
 
-            # Display/render on every loop iteration
-            world.display(current_input_str)
+            # Display/render on every loop iteration, now with cursor info
+            world.display(current_input_list, cursor_pos)  # <-- MODIFIED LINE
 
             time.sleep(0.1)
 
-        except IndexError:
-            # --- THIS IS THE CRASH HANDLER ---
-            # The game crashed, so we will now print a detailed report.
-            nb_input_for_cleanup.restore_terminal()  # Restore terminal before printing
+        except Exception as e:
+            # --- THIS IS THE UNIVERSAL CRASH HANDLER ---
+            # It caught an error, so we will print a full report.
+            nb_input_for_cleanup.restore_terminal()
             print("\n" * 5)
-            print("=" * 50)
-            print(
-                f"{Colors.RED}FATAL: An IndexError occurred! Printing debug info...{Colors.RESET}"
-            )
-            print("=" * 50)
-            print(f"World Tick: {world.tick_count}")
-            print(f"Total Entities: {len(world.entities)}")
-            print("\n--- CULPRIT ANALYSIS ---")
+            print("=" * 60)
+            print(f"{Colors.RED}>>> A FATAL ERROR OCCURRED! <<<")
+            print(f"ERROR TYPE: {type(e).__name__}{Colors.RESET}")
+            print(f"ERROR DETAILS: {e}")
+            print("=" * 60)
+            print("\n--- TRACEBACK (Shows where the error happened) ---")
+            # This prints the full "call stack", pointing to the exact line
+            traceback.print_exc()
+            print("--------------------------------------------------")
 
-            culprit_found = False
-            for entity in world.entities:
+            print("\n--- ENTITY STATE AT TIME OF CRASH ---")
+            for i, entity in enumerate(world.entities):
                 pos = entity.position
                 grid_x = int(pos[0] / TILE_SIZE_METERS)
                 grid_y = int(pos[1] / TILE_SIZE_METERS)
-
-                # Check if this entity's position is out of bounds
-                if not (0 <= grid_x < world.width and 0 <= grid_y < world.height):
-                    culprit_found = True
-                    print(f"{Colors.YELLOW}Found likely culprit:{Colors.RESET}")
-                    print(f"  Entity Name: {entity.name}")
-                    print(f"  Entity Type: {type(entity).__name__}")
-                    print(f"  Meter Position: ({pos[0]:.4f}, {pos[1]:.4f})")
-                    print(
-                        f"{Colors.RED}  Calculated Grid Index: ({grid_x}, {grid_y}) <-- INVALID{Colors.RESET}"
-                    )
-                    print(f"  World Size (Grid): ({world.width}, {world.height})")
-                    if isinstance(entity, Human) and entity.path:
-                        print("  Human's Current Path (first 5 steps):")
-                        for i, step in enumerate(entity.path[:5]):
-                            print(f"    Step {i}: {step}")
-
-            if not culprit_found:
                 print(
-                    "Could not automatically identify the culprit. Printing all entity states:"
+                    f" Entity {i}: {entity.name} | Pos: ({pos[0]:.2f}, {pos[1]:.2f}) | Grid: ({grid_x}, {grid_y})"
                 )
-                for i, entity in enumerate(world.entities):
-                    pos = entity.position
-                    grid_x = int(pos[0] / TILE_SIZE_METERS)
-                    grid_y = int(pos[1] / TILE_SIZE_METERS)
-                    print(f"--- Entity {i} ---")
-                    print(f"  Name: {entity.name}, Type: {type(entity).__name__}")
-                    print(
-                        f"  Position: ({pos[0]:.4f}, {pos[1]:.4f}) -> Grid Index: ({grid_x}, {grid_y})"
-                    )
 
-            print("\n" + "=" * 50)
-            print("Game has been terminated. Please copy the text above.")
-            return  # Exit the loop gracefully
+            print("\n" + "=" * 60)
+            print("Game has been terminated. Please copy ALL the text from the")
+            print("'>>> A FATAL ERROR OCCURRED! <<<' line downwards and share it.")
+            return
 
 
 def input_handler(command_queue, shared_state):
-    """The dedicated input thread. Reads single chars and updates a shared buffer."""
+    """The dedicated input thread, now with full cursor movement and editing."""
     nb_input = NonBlockingInput()
     try:
         while True:
-            char = nb_input.get_char()
-            if char:
-                with shared_state["lock"]:
-                    if char in ("\r", "\n"):  # Enter key
-                        command = "".join(shared_state["input_buffer"])
-                        command_queue.put(command)
-                        shared_state["input_buffer"].clear()
-                    elif char in ("\x7f", "\b"):  # Backspace
-                        if shared_state["input_buffer"]:
-                            shared_state["input_buffer"].pop()
-                    else:
-                        shared_state["input_buffer"].append(char)
+            if ON_WINDOWS:
+                if msvcrt.kbhit():
+                    byte = msvcrt.getch()
 
-            # Small sleep to prevent this thread from using 100% CPU
+                    # --- Special Key Handling ---
+                    if byte in (b"\xe0", b"\x00"):
+                        second_byte = msvcrt.getch()
+                        with shared_state["lock"]:
+                            if second_byte == b"K":  # Left Arrow
+                                shared_state["cursor_pos"] = max(
+                                    0, shared_state["cursor_pos"] - 1
+                                )
+                            elif second_byte == b"M":  # Right Arrow
+                                cursor = shared_state["cursor_pos"]
+                                buf_len = len(shared_state["input_buffer"])
+                                shared_state["cursor_pos"] = min(buf_len, cursor + 1)
+                        continue
+
+                    # --- Normal Key Handling ---
+                    with shared_state["lock"]:
+                        if byte == b"\r":  # Enter key
+                            command = "".join(shared_state["input_buffer"])
+                            if command:
+                                command_queue.put(command)
+                            shared_state["input_buffer"].clear()
+                            shared_state["cursor_pos"] = 0
+                        elif byte == b"\x08":  # Backspace
+                            cursor = shared_state["cursor_pos"]
+                            if cursor > 0:
+                                shared_state["input_buffer"].pop(cursor - 1)
+                                shared_state["cursor_pos"] = cursor - 1
+                        else:
+                            try:
+                                char = byte.decode("utf-8")
+                                if char.isprintable():
+                                    cursor = shared_state["cursor_pos"]
+                                    shared_state["input_buffer"].insert(cursor, char)
+                                    shared_state["cursor_pos"] = cursor + 1
+                            except UnicodeDecodeError:
+                                pass
+            else:
+                # This is the placeholder for Linux/macOS
+                time.sleep(0.01)  # Add sleep here to avoid busy-loop if not on windows
+                pass
+
             time.sleep(0.01)
     finally:
         nb_input.restore_terminal()
 
 
-def find_path(self, start_pos, end_pos):
-    """
-    Finds a path from start_pos to end_pos using A* algorithm.
-    Positions are in grid coordinates (e.g., (x, y)).
-    """
-
-    def get_move_cost(grid_pos):
-        tile = self.grid[grid_pos[1]][grid_pos[0]]
-        # Inverse of speed factor. Water (0) is infinite cost.
-        if tile.tile_move_speed_factor == 0:
-            return float("inf")
-        return 1.0 / tile.tile_move_speed_factor
-
-    start_node = (start_pos[0], start_pos[1])
-    end_node = (end_pos[0], end_pos[1])
-
-    # A* requires a priority queue (min-heap) for the open set
-    open_set = []
-    heapq.heappush(open_set, (0, start_node))  # (f_score, node)
-
-    came_from = {}
-    g_score = {start_node: 0}  # Cost from start to current node
-    f_score = {
-        start_node: np.linalg.norm(np.array(start_node) - np.array(end_node))
-    }  # g_score + heuristic
-
-    while open_set:
-        current = heapq.heappop(open_set)[1]
-
-        if current == end_node:
-            # Reconstruct path
-            path = []
-            while current in came_from:
-                path.append(current)
-                current = came_from[current]
-            return path[::-1]  # Return reversed path
-
-        # Check neighbors (including diagonals)
-        for dx in [-1, 0, 1]:
-            for dy in [-1, 0, 1]:
-                if dx == 0 and dy == 0:
-                    continue
-
-                neighbor = (current[0] + dx, current[1] + dy)
-
-                if not (
-                    0 <= neighbor[0] < self.width and 0 <= neighbor[1] < self.height
-                ):
-                    continue
-
-                # The cost to move to the neighbor
-                move_cost = get_move_cost(neighbor)
-                if move_cost == float("inf"):
-                    continue  # Impassable terrain
-
-                # Diagonal moves are slightly more expensive
-                tentative_g_score = g_score[current] + (
-                    move_cost * (1.414 if dx != 0 and dy != 0 else 1.0)
-                )
-
-                if tentative_g_score < g_score.get(neighbor, float("inf")):
-                    came_from[neighbor] = current
-                    g_score[neighbor] = tentative_g_score
-                    heuristic = np.linalg.norm(np.array(neighbor) - np.array(end_node))
-                    f_score[neighbor] = tentative_g_score + heuristic
-                    if neighbor not in [i[1] for i in open_set]:
-                        heapq.heappush(open_set, (f_score[neighbor], neighbor))
-
-    return None  # No path found
-
-
 if __name__ == "__main__":
-    # --- NEW: Enable ANSI escape codes on Windows ---
+    # Enable ANSI escape codes on Windows
     if ON_WINDOWS:
-        os.system(
-            ""
-        )  # This is a simple way to enable ANSI support in modern Windows terminals
+        os.system("")
 
     # Add heapq for our pathfinding algorithm's priority queue
     import heapq
 
     # A shared dictionary to pass state between threads
-    shared_state = {"input_buffer": [], "lock": threading.Lock()}
+    shared_state = {"input_buffer": [], "cursor_pos": 0, "lock": threading.Lock()}
 
     world = World(GRID_WIDTH, GRID_HEIGHT)
     cmd_queue = queue.Queue()
@@ -563,12 +576,15 @@ if __name__ == "__main__":
     nb_input_for_cleanup = NonBlockingInput()
 
     try:
-        # Initial display
-        world.display("")
+        # --- START OF FIX ---
+        # Initial display calls must now match the new display() signature
+        # by providing an empty list and a cursor position of 0.
+        world.display([], 0)
         world.add_log("Welcome to the simulation!")
         world.add_log("The world has been generated.")
         world.add_log("Use the command 'sp human 32 15' to start.")
-        world.display("")  # Display welcome messages
+        world.display([], 0)  # Display welcome messages
+        # --- END OF FIX ---
 
         input_thread = threading.Thread(
             target=input_handler, args=(cmd_queue, shared_state), daemon=True
