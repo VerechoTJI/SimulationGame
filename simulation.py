@@ -27,6 +27,10 @@ GRID_WIDTH = 64
 GRID_HEIGHT = 32
 TICK_SECONDS = 3
 TILE_SIZE_METERS = 10
+CLEAR_METHOD = (
+    "ansi"  # Use 'ansi' for modern terminals (PowerShell/Linux/macOS) for no flicker.
+)
+# Use 'cls' for old Windows CMD if 'ansi' doesn't work.
 
 
 # --- Helper for colored output ---
@@ -118,19 +122,27 @@ class Human(Entity):
         """Picks a new random destination and asks the world to find a path to it."""
         self.path = []
 
+        # --- MODIFICATION START ---
+        # Get the human's current grid position, ensuring it's safely within bounds
+        start_grid_x = np.clip(
+            int(self.position[0] / TILE_SIZE_METERS), 0, world.width - 1
+        )
+        start_grid_y = np.clip(
+            int(self.position[1] / TILE_SIZE_METERS), 0, world.height - 1
+        )
+        # --- MODIFICATION END ---
+
+        # Make sure we don't try to pathfind from an impassable tile
+        if world.grid[start_grid_y][start_grid_x].tile_move_speed_factor == 0:
+            world.add_log(
+                f"{Colors.RED}{self.name} is stuck on an impassable tile!{Colors.RESET}"
+            )
+            return
+
         # Try a few times to find a path to a random valid location
-        for _ in range(10):  # Try 10 times to prevent infinite loop
+        for _ in range(10):
             dest_x = random.randint(0, world.width - 1)
             dest_y = random.randint(0, world.height - 1)
-
-            start_grid_x = int(self.position[0] / TILE_SIZE_METERS)
-            start_grid_y = int(self.position[1] / TILE_SIZE_METERS)
-
-            # Make sure we don't try to pathfind from an invalid tile
-            if world.grid[start_grid_y][start_grid_x].tile_move_speed_factor == 0:
-                # If stuck in water, just wander randomly to hopefully get out
-                self.destination = None  # Fallback to old random walk
-                return
 
             path = world.find_path((start_grid_x, start_grid_y), (dest_x, dest_y))
 
@@ -148,16 +160,14 @@ class Human(Entity):
     def tick(self, world):
         super().tick(world)
 
-        # 1. If we don't have a path, find one.
+        # Find a path if we don't have one
         if not self.path:
             self._find_new_path(world)
-            # If still no path after trying, do nothing this tick
             if not self.path:
-                return
+                return  # Can't move without a path
 
-        # 2. Get the next step in our path
+        # Get the next step in our path
         target_grid_pos = self.path[0]
-        # Convert grid coordinate to world meter coordinate (center of tile)
         target_pos = np.array(
             [
                 (target_grid_pos[0] + 0.5) * TILE_SIZE_METERS,
@@ -165,7 +175,7 @@ class Human(Entity):
             ]
         )
 
-        # 3. Move towards the next step
+        # Move towards the next step
         current_tile = world.get_tile_at_pos(self.position[0], self.position[1])
         effective_speed = self.move_speed * current_tile.tile_move_speed_factor
 
@@ -173,21 +183,29 @@ class Human(Entity):
             direction_vector = target_pos - self.position
             distance_to_target = np.linalg.norm(direction_vector)
 
-            # 4. If we are close enough to the next step, pop it from the path
             if distance_to_target < effective_speed:
-                self.position = target_pos  # Snap to target
+                self.position = target_pos
                 self.path.pop(0)
                 if not self.path:
                     world.add_log(
                         f"{Colors.GREEN}{self.name} has reached their destination.{Colors.RESET}"
                     )
             else:
-                # Move towards the target
                 normalized_direction = direction_vector / distance_to_target
                 move_vector = normalized_direction * effective_speed
                 self.position += move_vector
 
-        # Interaction (Harvesting) logic is unchanged
+        # --- DEFINITIVE CRASH FIX ---
+        # After every potential move, clamp the position to be strictly within the
+        # valid world boundaries. This prevents floating point errors from ever
+        # causing a position like 640.0, which leads to an IndexError.
+        max_x = world.width * TILE_SIZE_METERS
+        max_y = world.height * TILE_SIZE_METERS
+        self.position[0] = np.clip(self.position[0], 0, max_x - 0.01)
+        self.position[1] = np.clip(self.position[1], 0, max_y - 0.01)
+        # --- END OF FIX ---
+
+        # Interaction (Harvesting) logic
         for entity in world.entities:
             if isinstance(entity, Rice) and entity.matured:
                 if np.linalg.norm(self.position - entity.position) <= 1.0:
@@ -247,11 +265,14 @@ class World:
         return world_map
 
     def get_tile_at_pos(self, pos_x, pos_y):
-        # ... (unchanged)
+        """Gets the tile at a specific meter-based coordinate, now with extra safety."""
+        # Convert and clamp the coordinates to be strictly within the valid grid indices
         grid_x = int(pos_x / TILE_SIZE_METERS)
         grid_y = int(pos_y / TILE_SIZE_METERS)
+
         grid_x = np.clip(grid_x, 0, self.width - 1)
         grid_y = np.clip(grid_y, 0, self.height - 1)
+
         return self.grid[grid_y][grid_x]
 
     def spawn_entity(self, entity_type, x, y):
@@ -288,8 +309,9 @@ class World:
                 self.entities.remove(entity)
 
     def display(self, current_input):
-        """Clears the screen and draws the entire world state, including user input."""
-        os.system("cls" if os.name == "nt" else "clear")
+        """Clears the screen using the configured method and draws the world state."""
+        # Build the entire screen content into a buffer first
+        output_buffer = []
 
         display_grid = [
             [(tile.color + tile.symbol) for tile in row] for row in self.grid
@@ -301,66 +323,129 @@ class World:
                 color = Colors.MAGENTA if isinstance(entity, Human) else Colors.YELLOW
                 display_grid[grid_y][grid_x] = color + entity.symbol
 
-        # Build the output string before printing for a flicker-free update
-        output = "--- Simulation Game ---\n"
+        output_buffer.append("--- Simulation Game ---")
         for row in display_grid:
-            output += " ".join(row) + Colors.RESET + "\n"
+            output_buffer.append(" ".join(row) + Colors.RESET)
 
-        output += "-" * (self.width * 2) + "\n"
-        output += f"Tick: {self.tick_count} | Entities: {len(self.entities)}\n"
-        output += f"Commands: sp [human|rice] [x] [y] | q to quit\n"
-        output += "Log messages:\n"
+        output_buffer.append("-" * (self.width * 2))
+        output_buffer.append(
+            f"Tick: {self.tick_count} | Entities: {len(self.entities)}"
+        )
+        output_buffer.append(f"Commands: sp [human|rice] [x] [y] | q to quit")
+        output_buffer.append("Log messages:")
         for msg in self.log_messages:
-            output += msg + "\n"
+            output_buffer.append(msg)
+        for _ in range(10 - len(self.log_messages)):
+            output_buffer.append(
+                ""
+            )  # Pad with blank lines to prevent old text from lingering
+        output_buffer.append(f"> {current_input}")
 
-        # Display the current user input at the bottom
-        output += f"\n> {current_input}"
+        # Join the buffer into a single string
+        final_output = "\n".join(output_buffer)
 
-        # Print the entire buffer at once
-        sys.stdout.write(output)
+        # Clear the screen using the selected method and print
+        if CLEAR_METHOD == "ansi":
+            # \033[H moves cursor to top-left. \033[J clears screen from cursor down.
+            # This is the standard for flicker-free updates.
+            sys.stdout.write("\033[H\033[J" + final_output)
+        else:  # 'cls'
+            os.system("cls")
+            sys.stdout.write(final_output)
+
         sys.stdout.flush()
 
 
 # --- Main Game Loop and Input Handling ---
 def game_loop(world, command_queue, shared_state):
-    """The main game thread. Now separates rendering from ticking."""
+    """The main game thread, now with a crash handler for debugging."""
     last_tick_time = time.time()
 
     while True:
-        # Check for commands from the input thread
-        try:
-            command = command_queue.get_nowait()
-            if command.lower() in ["q", "quit", "exit"]:
-                return  # Signal to main thread to exit gracefully
-
-            parts = command.split()
-            if len(parts) == 4 and parts[0].lower() == "sp":
-                try:
+        try:  # --- START OF CRASH HANDLER BLOCK ---
+            # Check for commands from the input thread
+            try:
+                command = command_queue.get_nowait()
+                if command.lower() in ["q", "quit", "exit"]:
+                    return
+                parts = command.split()
+                if len(parts) == 4 and parts[0].lower() == "sp":
                     world.spawn_entity(parts[1], int(parts[2]), int(parts[3]))
-                except (ValueError, IndexError):
+                else:
                     world.add_log(
-                        f"{Colors.RED}Invalid spawn command. Use: sp [human|rice] [x] [y]{Colors.RESET}"
+                        f"{Colors.RED}Unknown command: '{command}'{Colors.RESET}"
                     )
-            else:
-                world.add_log(f"{Colors.RED}Unknown command: '{command}'{Colors.RESET}")
-        except queue.Empty:
-            pass
+            except (queue.Empty, ValueError, IndexError):
+                pass  # Ignore bad commands or empty queue
 
-        # Check if it's time for a game logic tick
-        current_time = time.time()
-        if current_time - last_tick_time >= TICK_SECONDS:
-            world.game_tick()
-            last_tick_time = current_time
+            # Check if it's time for a game logic tick
+            current_time = time.time()
+            if current_time - last_tick_time >= TICK_SECONDS:
+                world.game_tick()
+                last_tick_time = current_time
 
-        # Get the current input from the shared state to display it
-        with shared_state["lock"]:
-            current_input_str = "".join(shared_state["input_buffer"])
+            # Get the current input from the shared state to display it
+            with shared_state["lock"]:
+                current_input_str = "".join(shared_state["input_buffer"])
 
-        # Display/render on every loop iteration for responsive input
-        world.display(current_input_str)
+            # Display/render on every loop iteration
+            world.display(current_input_str)
 
-        # Sleep for a short duration to prevent 100% CPU usage
-        time.sleep(0.05)
+            time.sleep(0.1)
+
+        except IndexError:
+            # --- THIS IS THE CRASH HANDLER ---
+            # The game crashed, so we will now print a detailed report.
+            nb_input_for_cleanup.restore_terminal()  # Restore terminal before printing
+            print("\n" * 5)
+            print("=" * 50)
+            print(
+                f"{Colors.RED}FATAL: An IndexError occurred! Printing debug info...{Colors.RESET}"
+            )
+            print("=" * 50)
+            print(f"World Tick: {world.tick_count}")
+            print(f"Total Entities: {len(world.entities)}")
+            print("\n--- CULPRIT ANALYSIS ---")
+
+            culprit_found = False
+            for entity in world.entities:
+                pos = entity.position
+                grid_x = int(pos[0] / TILE_SIZE_METERS)
+                grid_y = int(pos[1] / TILE_SIZE_METERS)
+
+                # Check if this entity's position is out of bounds
+                if not (0 <= grid_x < world.width and 0 <= grid_y < world.height):
+                    culprit_found = True
+                    print(f"{Colors.YELLOW}Found likely culprit:{Colors.RESET}")
+                    print(f"  Entity Name: {entity.name}")
+                    print(f"  Entity Type: {type(entity).__name__}")
+                    print(f"  Meter Position: ({pos[0]:.4f}, {pos[1]:.4f})")
+                    print(
+                        f"{Colors.RED}  Calculated Grid Index: ({grid_x}, {grid_y}) <-- INVALID{Colors.RESET}"
+                    )
+                    print(f"  World Size (Grid): ({world.width}, {world.height})")
+                    if isinstance(entity, Human) and entity.path:
+                        print("  Human's Current Path (first 5 steps):")
+                        for i, step in enumerate(entity.path[:5]):
+                            print(f"    Step {i}: {step}")
+
+            if not culprit_found:
+                print(
+                    "Could not automatically identify the culprit. Printing all entity states:"
+                )
+                for i, entity in enumerate(world.entities):
+                    pos = entity.position
+                    grid_x = int(pos[0] / TILE_SIZE_METERS)
+                    grid_y = int(pos[1] / TILE_SIZE_METERS)
+                    print(f"--- Entity {i} ---")
+                    print(f"  Name: {entity.name}, Type: {type(entity).__name__}")
+                    print(
+                        f"  Position: ({pos[0]:.4f}, {pos[1]:.4f}) -> Grid Index: ({grid_x}, {grid_y})"
+                    )
+
+            print("\n" + "=" * 50)
+            print("Game has been terminated. Please copy the text above.")
+            return  # Exit the loop gracefully
 
 
 def input_handler(command_queue, shared_state):
@@ -459,6 +544,12 @@ def find_path(self, start_pos, end_pos):
 
 
 if __name__ == "__main__":
+    # --- NEW: Enable ANSI escape codes on Windows ---
+    if ON_WINDOWS:
+        os.system(
+            ""
+        )  # This is a simple way to enable ANSI support in modern Windows terminals
+
     # Add heapq for our pathfinding algorithm's priority queue
     import heapq
 
