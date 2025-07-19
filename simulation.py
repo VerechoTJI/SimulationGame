@@ -9,7 +9,7 @@ import queue
 
 # --- Game Configuration ---
 GRID_WIDTH = 64
-GRID_HEIGHT = 64
+GRID_HEIGHT = 32  # <-- Changed from 64 to 32
 TICK_SECONDS = 3
 TILE_SIZE_METERS = 10  # Each tile is 10x10 meters
 
@@ -35,7 +35,6 @@ class Tile:
         self.tile_move_speed_factor = move_speed_factor
 
 
-# Define our tile types
 TILES = {
     "land": Tile("Land", ".", Colors.GREEN, 1.0),
     "water": Tile("Water", "~", Colors.BLUE, 0.0),
@@ -45,8 +44,6 @@ TILES = {
 
 # --- 2. Entity Definitions ---
 class Entity:
-    """Base class for all entities in the game."""
-
     id_counter = 0
 
     def __init__(self, name, symbol, pos_x, pos_y, max_age):
@@ -54,15 +51,11 @@ class Entity:
         Entity.id_counter += 1
         self.name = f"{name}_{self.id}"
         self.symbol = symbol
-
-        # Position is in meters, not grid cells
         self.position = np.array([float(pos_x), float(pos_y)])
-
         self.age = 0
         self.max_age = max_age
 
     def tick(self, world):
-        """Called once per game tick."""
         self.age += 1
 
     def is_alive(self):
@@ -75,37 +68,67 @@ class Entity:
 class Human(Entity):
     def __init__(self, pos_x, pos_y):
         super().__init__("Human", "H", pos_x, pos_y, max_age=1200)
-        self.move_speed = 1.4  # meters per tick (avg human walking speed)
+        self.move_speed = 1.4
+        self.destination = None  # <-- NEW: Human now has a destination
+
+    def _pick_new_destination(self, world):
+        """Picks a new random destination within the world boundaries."""
+        max_x = world.width * TILE_SIZE_METERS
+        max_y = world.height * TILE_SIZE_METERS
+        dest_x = random.uniform(0, max_x)
+        dest_y = random.uniform(0, max_y)
+        self.destination = np.array([dest_x, dest_y])
 
     def tick(self, world):
         super().tick(world)
 
-        # 1. Movement
+        # --- NEW MOVEMENT LOGIC ---
+
+        # 1. Check for a destination. If there isn't one, or we've arrived, pick a new one.
+        if self.destination is None:
+            self._pick_new_destination(world)
+            print(
+                f"{Colors.CYAN}{self.name} decided to travel to a new destination: {self.destination.round(1)}{Colors.RESET}"
+            )
+
+        # 2. Calculate movement towards destination
         current_tile = world.get_tile_at_pos(self.position[0], self.position[1])
         effective_speed = self.move_speed * current_tile.tile_move_speed_factor
 
-        if effective_speed > 0:
-            # Move in a random direction
-            angle = random.uniform(0, 2 * math.pi)
-            move_vector = np.array([math.cos(angle), math.sin(angle)]) * effective_speed
-            self.position += move_vector
+        if effective_speed > 0 and self.destination is not None:
+            direction_vector = self.destination - self.position
+            distance_to_destination = np.linalg.norm(direction_vector)
 
-            # Boundary check to keep human on the map
-            max_x = GRID_WIDTH * TILE_SIZE_METERS
-            max_y = GRID_HEIGHT * TILE_SIZE_METERS
-            self.position[0] = np.clip(self.position[0], 0, max_x - 0.01)
-            self.position[1] = np.clip(self.position[1], 0, max_y - 0.01)
+            # 3. Check if we have arrived at the destination
+            if distance_to_destination < effective_speed:
+                self.position = self.destination
+                self.destination = None
+                print(
+                    f"{Colors.GREEN}{self.name} has reached their destination.{Colors.RESET}"
+                )
+            else:
+                # Move towards the destination
+                # Normalize the direction vector (make its length 1) and multiply by speed
+                normalized_direction = direction_vector / distance_to_destination
+                move_vector = normalized_direction * effective_speed
+                self.position += move_vector
 
-        # 2. Interaction (Harvesting)
+        # Boundary check remains a good safety measure
+        max_x = GRID_WIDTH * TILE_SIZE_METERS
+        max_y = GRID_HEIGHT * TILE_SIZE_METERS
+        self.position[0] = np.clip(self.position[0], 0, max_x - 0.01)
+        self.position[1] = np.clip(self.position[1], 0, max_y - 0.01)
+
+        # 4. Interaction (Harvesting) - this logic is unchanged
         for entity in world.entities:
             if isinstance(entity, Rice) and entity.matured:
                 distance = np.linalg.norm(self.position - entity.position)
-                if distance <= 1.0:  # Close is defined as <= 1 meter
+                if distance <= 1.0:
                     print(
                         f"{Colors.YELLOW}{self.name} harvested and replanted {entity.name}.{Colors.RESET}"
                     )
                     entity.replant()
-                    break  # Harvest only one rice plant per tick
+                    break
 
 
 class Rice(Entity):
@@ -114,12 +137,10 @@ class Rice(Entity):
 
     @property
     def matured(self):
-        # Matures halfway through its life
         return self.age >= (self.max_age / 2)
 
     def tick(self, world):
         super().tick(world)
-        # Update symbol based on maturity
         self.symbol = "R" if self.matured else "r"
 
     def replant(self):
@@ -136,7 +157,6 @@ class World:
         self.tick_count = 0
 
     def generate_map(self):
-        """Generates a map using Perlin noise."""
         noise = PerlinNoise(octaves=4, seed=random.randint(1, 10000))
         world_map = [[None for _ in range(self.width)] for _ in range(self.height)]
 
@@ -154,7 +174,6 @@ class World:
         return world_map
 
     def get_tile_at_pos(self, pos_x, pos_y):
-        """Gets the tile at a specific meter-based coordinate."""
         grid_x = int(pos_x / TILE_SIZE_METERS)
         grid_y = int(pos_y / TILE_SIZE_METERS)
         grid_x = np.clip(grid_x, 0, self.width - 1)
@@ -162,7 +181,6 @@ class World:
         return self.grid[grid_y][grid_x]
 
     def spawn_entity(self, entity_type, x, y):
-        # Convert grid coords to meter coords for spawning
         pos_x = (x + 0.5) * TILE_SIZE_METERS
         pos_y = (y + 0.5) * TILE_SIZE_METERS
 
@@ -181,39 +199,35 @@ class World:
             print(f"{Colors.RED}Unknown entity type: {entity_type}{Colors.RESET}")
 
     def game_tick(self):
-        """Processes one tick of the simulation."""
         self.tick_count += 1
 
         # Tick every entity
-        for entity in self.entities:
-            entity.tick(self)
+        if self.entities:
+            for entity in list(self.entities):
+                entity.tick(self)
 
         # Remove dead entities
         dead_entities = [e for e in self.entities if not e.is_alive()]
-        for entity in dead_entities:
-            print(f"{Colors.RED}{entity.name} has died of old age.{Colors.RESET}")
-            self.entities.remove(entity)
+        if dead_entities:
+            for entity in dead_entities:
+                print(f"{Colors.RED}{entity.name} has died of old age.{Colors.RESET}")
+                self.entities.remove(entity)
 
     def display(self):
-        """Clears the screen and draws the world state."""
         os.system("cls" if os.name == "nt" else "clear")
 
-        # Create a character grid for display
         display_grid = [
             [(tile.color + tile.symbol) for tile in row] for row in self.grid
         ]
 
-        # Place entities on the display grid
         for entity in self.entities:
             grid_x = int(entity.position[0] / TILE_SIZE_METERS)
             grid_y = int(entity.position[1] / TILE_SIZE_METERS)
 
-            # Ensure entity is within bounds for display
             if 0 <= grid_y < self.height and 0 <= grid_x < self.width:
                 color = Colors.MAGENTA if isinstance(entity, Human) else Colors.YELLOW
                 display_grid[grid_y][grid_x] = color + entity.symbol
 
-        # Print the grid
         print("--- Simulation Game ---")
         for row in display_grid:
             print(" ".join(row) + Colors.RESET)
@@ -221,7 +235,7 @@ class World:
         print("-" * (self.width * 2))
         print(f"Tick: {self.tick_count} | Entities: {len(self.entities)}")
         print(
-            f"Commands: sp [human|rice] [x] [y]  (e.g., 'sp human 32 32') | q to quit"
+            f"Commands: sp [human|rice] [x] [y]  (e.g., 'sp human 32 15') | q to quit"
         )
         print("Log messages:")
 
@@ -229,15 +243,13 @@ class World:
 # --- 4. Main Game Loop and Input Handling ---
 def game_loop(world, command_queue):
     while True:
-        # Check for commands from the input thread
         try:
             command = command_queue.get_nowait()
             if command.lower() in ["q", "quit", "exit"]:
                 print("Exiting game.")
-                os._exit(0)  # Force exit to stop all threads
+                os._exit(0)
 
             parts = command.split()
-            # sp [entity] [x] [y]
             if len(parts) == 4 and parts[0].lower() == "sp":
                 try:
                     entity_type = parts[1]
@@ -252,7 +264,7 @@ def game_loop(world, command_queue):
                 print(f"{Colors.RED}Unknown command: '{command}'{Colors.RESET}")
 
         except queue.Empty:
-            pass  # No commands, just continue the loop
+            pass
 
         world.game_tick()
         world.display()
@@ -266,25 +278,19 @@ def input_handler(command_queue):
 
 
 if __name__ == "__main__":
-    # Initialize World
     world = World(GRID_WIDTH, GRID_HEIGHT)
-
-    # Create a queue for communication between threads
     cmd_queue = queue.Queue()
 
-    # Start the input handler in a separate thread
     input_thread = threading.Thread(
         target=input_handler, args=(cmd_queue,), daemon=True
     )
     input_thread.start()
 
-    # Initial setup message
     world.display()
     print("\nWelcome to the simulation!")
-    print("The world map has been generated.")
-    print("Use the command 'sp human 32 32' to spawn your first human.")
+    print(f"The world (64x32) has been generated.")
+    print("Use the command 'sp human 32 15' to spawn your first human.")
 
-    # Start the main game loop
     try:
         game_loop(world, cmd_queue)
     except KeyboardInterrupt:
