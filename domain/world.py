@@ -29,15 +29,54 @@ class World:
         self.width = width
         self.height = height
         self.tile_size_meters = tile_size
-        self.config = config_data  # Store the config data
+        self.config = config_data
         self.grid = self._generate_map()
         self.entities = []
         self.tick_count = 0
         self.log_messages = []
-        # --- MODIFIED: Get spawn chance from the passed-in config ---
+        # --- REFACTORED: Read from the new config structure ---
         self.rice_spawn_chance_per_tick = self.get_config_value(
-            "entities", "rice", "natural_spawn_chance"
+            "entities", "rice", "spawning", "natural_spawn_chance"
         )
+
+    # --- REFACTORED: Use the new 'attributes' sub-object ---
+    def _create_human(self, pos_x, pos_y, initial_saturation=None):
+        """Internal factory for creating a Human instance."""
+        human_attributes = self.get_config_value("entities", "human", "attributes")
+        human = Human(pos_x, pos_y, **human_attributes)
+        if initial_saturation is not None:
+            human.saturation = initial_saturation
+        return human
+
+    def _find_adjacent_walkable_tile(self, grid_pos):
+        """Finds a random, empty, walkable tile adjacent to a given grid position."""
+        occupied_tiles = {self.get_grid_position(e.position) for e in self.entities}
+        x, y = grid_pos
+        possible_spawns = []
+
+        for dy in [-1, 0, 1]:
+            for dx in [-1, 0, 1]:
+                if dx == 0 and dy == 0:
+                    continue
+
+                nx, ny = x + dx, y + dy
+
+                # Check bounds
+                if not (0 <= nx < self.width and 0 <= ny < self.height):
+                    continue
+
+                # Check if occupied
+                if (nx, ny) in occupied_tiles:
+                    continue
+
+                # Check if walkable
+                tile = self.grid[ny][nx]
+                if tile.tile_move_speed_factor > 0:
+                    possible_spawns.append((nx, ny))
+
+        if possible_spawns:
+            return random.choice(possible_spawns)
+        return None
 
     def get_config_value(self, *keys, default=None):
         value = self.config
@@ -130,29 +169,10 @@ class World:
         new_entity = None
 
         if entity_type.lower() == "human":
-            # --- INJECTING DEPENDENCIES ---
-            new_entity = Human(
-                pos_x,
-                pos_y,
-                max_age=self.get_config_value("entities", "human", "max_age"),
-                move_speed=self.get_config_value("entities", "human", "move_speed"),
-                max_saturation=self.get_config_value(
-                    "entities", "human", "max_saturation"
-                ),
-                hungry_threshold=self.get_config_value(
-                    "entities", "human", "hungry_threshold"
-                ),
-            )
+            new_entity = self._create_human(pos_x, pos_y)
         elif entity_type.lower() == "rice":
-            new_entity = Rice(
-                pos_x,
-                pos_y,
-                max_age=self.get_config_value("entities", "rice", "max_age"),
-                # --- NEW: Inject saturation_yield ---
-                saturation_yield=self.get_config_value(
-                    "entities", "rice", "saturation_yield"
-                ),
-            )
+            rice_attributes = self.get_config_value("entities", "rice", "attributes")
+            new_entity = Rice(pos_x, pos_y, **rice_attributes)
 
         if new_entity:
             self.entities.append(new_entity)
@@ -243,10 +263,36 @@ class World:
         # Handle natural world events first
         self.natural_spawning_tick()
 
+        newly_born = []
+
         # Then, tick all entities
         if self.entities:
             for entity in list(self.entities):
                 entity.tick(self)
+
+                # --- NEW REPRODUCTION LOGIC ---
+                if isinstance(entity, Human) and entity.can_reproduce():
+                    parent_grid_pos = self.get_grid_position(entity.position)
+                    spawn_grid_pos = self._find_adjacent_walkable_tile(parent_grid_pos)
+
+                    if spawn_grid_pos:
+                        # This applies cost/cooldown to parent and gets baby's food
+                        newborn_saturation = entity.reproduce()
+
+                        spawn_x, spawn_y = spawn_grid_pos
+                        pos_x = (spawn_x + 0.5) * self.tile_size_meters
+                        pos_y = (spawn_y + 0.5) * self.tile_size_meters
+
+                        newborn = self._create_human(
+                            pos_x, pos_y, initial_saturation=newborn_saturation
+                        )
+                        newly_born.append(newborn)
+                        self.add_log(
+                            f"{Colors.MAGENTA}{entity.name} has given birth to {newborn.name}!{Colors.RESET}"
+                        )
+        # Add newborns to the world after the main loop to avoid modifying list during iteration
+        if newly_born:
+            self.entities.extend(newly_born)
 
         # Finally, handle deaths
         dead_entities = [e for e in self.entities if not e.is_alive()]
@@ -260,3 +306,11 @@ class World:
                     f"{Colors.RED}{entity.name} has died {death_reason}.{Colors.RESET}"
                 )
                 self.entities.remove(entity)
+
+    def get_grid_position(self, world_position):
+        """Converts a world position (numpy array) to a grid tuple (x, y)."""
+        grid_x = int(world_position[0] / self.tile_size_meters)
+        grid_y = int(world_position[1] / self.tile_size_meters)
+        grid_x = np.clip(grid_x, 0, self.width - 1)
+        grid_y = np.clip(grid_y, 0, self.height - 1)
+        return (grid_x, grid_y)

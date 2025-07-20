@@ -131,3 +131,45 @@ class TestHumanAI:
         assert human.saturation > initial_saturation
         assert food.age == 0
         assert not human.path
+
+
+class TestHumanReproduction:
+    def test_can_reproduce_is_true_when_conditions_are_met(self, human):
+        # Arrange: Set human to a state where it should be able to reproduce
+        human.saturation = 95  # Above threshold of 90
+        human.reproduction_cooldown = 0
+
+        # Act & Assert
+        assert human.can_reproduce() is True
+
+    def test_can_reproduce_is_false_if_saturation_is_too_low(self, human):
+        # Arrange: Saturation is below the threshold
+        human.saturation = 80  # Below threshold of 90
+        human.reproduction_cooldown = 0
+
+        # Act & Assert
+        assert human.can_reproduce() is False
+
+    def test_can_reproduce_is_false_if_on_cooldown(self, human):
+        # Arrange: Human is on cooldown, even with high saturation
+        human.saturation = 95
+        human.reproduction_cooldown = 10  # Cooldown is active
+
+        # Act & Assert
+        assert human.can_reproduce() is False
+
+    def test_reproduce_method_deducts_saturation_and_sets_cooldown(self, human):
+        # Arrange: Set up a human ready to reproduce
+        human.saturation = 98
+        human.reproduction_cooldown = 0
+
+        # Act: Call the reproduction method
+        newborn_saturation = human.reproduce()
+
+        # Assert: Check parent's state and newborn's endowment
+        # Parent cost is 50, so 98 - 50 = 48
+        assert human.saturation == 48
+        # Cooldown should be reset to 20
+        assert human.reproduction_cooldown == 20
+        # Newborn should receive the configured endowment of 40
+        assert newborn_saturation == 40

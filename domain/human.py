@@ -13,13 +13,29 @@ class Human(Entity):
         move_speed: float,
         max_saturation: int,
         hungry_threshold: int,
+        # --- NEW: Reproduction parameters from config ---
+        reproduction_threshold: int,
+        reproduction_cost: int,
+        reproduction_cooldown: int,
+        newborn_saturation_endowment: int,
     ):
         super().__init__("Human", "H", pos_x, pos_y, max_age=max_age)
         self.move_speed = move_speed
         self.path = []
+
+        # Saturation Attributes
         self.max_saturation = max_saturation
         self.saturation = self.max_saturation
         self.is_hungry_threshold = hungry_threshold
+
+        # --- NEW: Reproduction attributes ---
+        self.reproduction_threshold = reproduction_threshold
+        self.reproduction_cost = reproduction_cost
+        self.reproduction_cooldown_period = (
+            reproduction_cooldown  # The value from config
+        )
+        self.newborn_saturation_endowment = newborn_saturation_endowment
+        self.reproduction_cooldown = 0  # The human's current timer, starts at 0
 
     # --- MODIFIED: is_alive() now checks saturation ---
     def is_alive(self):
@@ -41,6 +57,23 @@ class Human(Entity):
                 self.max_saturation, self.saturation + eatable_entity.saturation_yield
             )
             eatable_entity.replant()
+
+    # --- NEW: Blastogenesis (asexual reproduction) methods ---
+    def can_reproduce(self) -> bool:
+        """Checks if the human meets the conditions for reproduction."""
+        return (
+            self.saturation >= self.reproduction_threshold
+            and self.reproduction_cooldown <= 0
+        )
+
+    def reproduce(self) -> int:
+        """
+        Executes reproduction. Deducts saturation cost, sets the cooldown,
+        and returns the saturation endowment for the newborn.
+        """
+        self.saturation -= self.reproduction_cost
+        self.reproduction_cooldown = self.reproduction_cooldown_period
+        return self.newborn_saturation_endowment
 
     def _find_food_and_path(self, world):
         """Finds the nearest mature rice and sets a path to it."""
@@ -75,6 +108,11 @@ class Human(Entity):
     def tick(self, world):
         super().tick(world)
         self.saturation -= 1
+
+        # Decrease reproduction cooldown timer each tick
+        if self.reproduction_cooldown > 0:
+            self.reproduction_cooldown -= 1
+
         if not self.is_alive():
             return
 

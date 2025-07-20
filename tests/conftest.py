@@ -9,20 +9,30 @@ from domain.rice import Rice
 
 @pytest.fixture(scope="session")
 def mock_config():
-    """Provides a session-wide mock configuration dictionary."""
+    """Provides a session-wide mock configuration dictionary with the new structure."""
     return {
         "simulation": {"grid_width": 10, "grid_height": 10, "tile_size_meters": 10},
         "entities": {
             "human": {
-                "max_age": 100,
-                "move_speed": 1.4,
-                "max_saturation": 100,
-                "hungry_threshold": 40,
+                "attributes": {
+                    "max_age": 100,
+                    "move_speed": 1.4,
+                    "max_saturation": 100,
+                    "hungry_threshold": 40,
+                    "reproduction_threshold": 90,
+                    "reproduction_cost": 50,
+                    "reproduction_cooldown": 20,
+                    "newborn_saturation_endowment": 40,
+                }
             },
             "rice": {
-                "max_age": 16,
-                "natural_spawn_chance": 0.1,
-                "saturation_yield": 50,  # Moved here
+                "attributes": {
+                    "max_age": 16,
+                    "saturation_yield": 50,
+                },
+                "spawning": {
+                    "natural_spawn_chance": 0.1,
+                },
             },
         },
     }
@@ -30,38 +40,27 @@ def mock_config():
 
 @pytest.fixture
 def human_config(mock_config):
-    """Provides just the human-specific part of the config."""
-    return mock_config["entities"]["human"]
+    """Provides just the human's INSTANCE ATTRIBUTES from the config."""
+    return mock_config["entities"]["human"]["attributes"]
 
 
 @pytest.fixture
 def rice_config(mock_config):
-    """Provides just the rice-specific part of the config."""
-    return mock_config["entities"]["rice"]
+    """Provides just the rice plant's INSTANCE ATTRIBUTES from the config."""
+    return mock_config["entities"]["rice"]["attributes"]
 
 
 @pytest.fixture
 def human(human_config):
     """Provides a Human instance created with mock config."""
-    return Human(
-        pos_x=50,
-        pos_y=50,
-        max_age=human_config["max_age"],
-        move_speed=human_config["move_speed"],
-        max_saturation=human_config["max_saturation"],
-        hungry_threshold=human_config["hungry_threshold"],
-    )
+    return Human(pos_x=50, pos_y=50, **human_config)
 
 
 @pytest.fixture
 def rice_plant(rice_config):
-    """Provides a Rice instance created with mock config."""
-    return Rice(
-        pos_x=0,
-        pos_y=0,
-        max_age=rice_config["max_age"],
-        saturation_yield=rice_config["saturation_yield"],
-    )
+    """Provides a Rice instance. Refactored to be more robust like the human fixture."""
+    # Using dictionary unpacking is cleaner and more maintainable.
+    return Rice(pos_x=0, pos_y=0, **rice_config)
 
 
 @pytest.fixture
