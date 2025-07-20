@@ -104,9 +104,9 @@ def input_handler(command_queue, shared_state):
 
 
 def display(render_data, current_input_list, cursor_pos):
-    """The new display function, which is now stateless and only renders data."""
+    """The display function, which is stateless and only renders data it's given."""
     output_buffer = []
-    Colors = render_data["colors"]  # Get colors from the data blob
+    Colors = render_data["colors"]
 
     output_buffer.append("--- Simulation Game (DDD Refactor) ---")
     for row in render_data["display_grid"]:
@@ -116,14 +116,30 @@ def display(render_data, current_input_list, cursor_pos):
     output_buffer.append(
         f"Tick: {render_data['tick']} | Entities: {render_data['entity_count']}"
     )
-    output_buffer.append("Commands: sp [human|rice] [x] [y] | q to quit")
-    output_buffer.append("Log messages:")
 
+    # --- NEW: Display the Human Statuses section ---
+    output_buffer.append("--- Humans ---")
+    human_statuses = render_data.get("human_statuses", [])
+    if human_statuses:
+        # Sort humans by name for a consistent display order
+        human_statuses.sort()
+        for status in human_statuses:
+            output_buffer.append(status)
+    else:
+        output_buffer.append("No humans in the world.")
+
+    # We can adjust the layout slightly to make room
+    output_buffer.append("--- Log ---")
     for msg in render_data["logs"]:
         output_buffer.append(msg)
-    for _ in range(10 - len(render_data["logs"])):
+    # Adjust padding to keep the screen size consistent
+    # Total lines for Humans and Log area = 1 (Humans header) + num_humans + 1 (Log header) + num_logs
+    padding_lines = max(0, 8 - len(human_statuses) - len(render_data.get("logs", [])))
+    for _ in range(padding_lines):
         output_buffer.append("")
 
+    # --- Command prompt logic is unchanged ---
+    output_buffer.append(f"Commands: sp [human|rice] [x] [y] | q to quit")
     prompt_parts = ["> "]
     for i, char in enumerate(current_input_list):
         if i == cursor_pos:

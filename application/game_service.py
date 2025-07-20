@@ -2,6 +2,7 @@
 from domain.world import World
 from domain.entity import Colors
 from domain.human import Human
+from domain.rice import Rice  # Import Rice for type checking
 
 
 class GameService:
@@ -45,11 +46,28 @@ class GameService:
             [(tile.color + tile.symbol) for tile in row] for row in self.world.grid
         ]
 
+        # --- MODIFIED: More informative entity rendering ---
+        human_statuses = []
         for entity in self.world.entities:
             grid_x = int(entity.position[0] / self.world.tile_size_meters)
             grid_y = int(entity.position[1] / self.world.tile_size_meters)
+
             if 0 <= grid_y < self.world.height and 0 <= grid_x < self.world.width:
-                color = Colors.MAGENTA if isinstance(entity, Human) else Colors.YELLOW
+                if isinstance(entity, Human):
+                    # Change the Human's color on the map based on hunger status
+                    color = Colors.RED if entity.is_hungry() else Colors.MAGENTA
+
+                    # Create a formatted status string for the UI
+                    human_statuses.append(
+                        f"{color}{entity.name:<10s}{Colors.RESET} "
+                        f"| Sat: {entity.saturation:>3}/{entity.max_saturation}"
+                    )
+                elif isinstance(entity, Rice):
+                    # Change Rice color based on maturity
+                    color = Colors.GREEN if entity.matured else Colors.YELLOW
+                else:  # Default color for any other entity type
+                    color = Colors.WHITE
+
                 display_grid[grid_y][grid_x] = color + entity.symbol
 
         return {
@@ -59,4 +77,6 @@ class GameService:
             "entity_count": len(self.world.entities),
             "logs": self.world.log_messages,
             "colors": Colors,
+            # --- NEW: Pass the list of formatted status strings to the presenter ---
+            "human_statuses": human_statuses,
         }
