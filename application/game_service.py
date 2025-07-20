@@ -3,11 +3,12 @@ from domain.world import World
 from domain.entity import Colors
 from domain.human import Human
 from domain.rice import Rice  # Import Rice for type checking
+from .config import config  # Keep this import here
 
 
 class GameService:
     def __init__(self, width, height, tile_size):
-        self.world = World(width, height, tile_size)
+        self.world = World(width, height, tile_size, config_data=config.data)
 
     def initialize_world(self):
         """Add initial welcome messages."""

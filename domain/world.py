@@ -25,15 +25,28 @@ TILES = {
 
 
 class World:
-    def __init__(self, width, height, tile_size):
+    def __init__(self, width, height, tile_size, config_data: dict):
         self.width = width
         self.height = height
         self.tile_size_meters = tile_size
+        self.config = config_data  # Store the config data
         self.grid = self._generate_map()
         self.entities = []
         self.tick_count = 0
         self.log_messages = []
-        self.rice_spawn_chance_per_tick = 0.5  # 10% chance per game tick
+        # --- MODIFIED: Get spawn chance from the passed-in config ---
+        self.rice_spawn_chance_per_tick = self.get_config_value(
+            "entities", "rice", "natural_spawn_chance"
+        )
+
+    def get_config_value(self, *keys, default=None):
+        value = self.config
+        try:
+            for key in keys:
+                value = value[key]
+            return value
+        except (KeyError, TypeError):
+            return default
 
     def natural_spawning_tick(self):
         # Rule: Only attempt to spawn if the random chance succeeds.
@@ -115,10 +128,32 @@ class World:
         pos_x = (x + 0.5) * self.tile_size_meters
         pos_y = (y + 0.5) * self.tile_size_meters
         new_entity = None
+
         if entity_type.lower() == "human":
-            new_entity = Human(pos_x, pos_y)
+            # --- INJECTING DEPENDENCIES ---
+            new_entity = Human(
+                pos_x,
+                pos_y,
+                max_age=self.get_config_value("entities", "human", "max_age"),
+                move_speed=self.get_config_value("entities", "human", "move_speed"),
+                max_saturation=self.get_config_value(
+                    "entities", "human", "max_saturation"
+                ),
+                hungry_threshold=self.get_config_value(
+                    "entities", "human", "hungry_threshold"
+                ),
+            )
         elif entity_type.lower() == "rice":
-            new_entity = Rice(pos_x, pos_y)
+            new_entity = Rice(
+                pos_x,
+                pos_y,
+                max_age=self.get_config_value("entities", "rice", "max_age"),
+                # --- NEW: Inject saturation_yield ---
+                saturation_yield=self.get_config_value(
+                    "entities", "rice", "saturation_yield"
+                ),
+            )
+
         if new_entity:
             self.entities.append(new_entity)
             self.add_log(

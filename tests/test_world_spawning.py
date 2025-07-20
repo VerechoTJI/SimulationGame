@@ -1,26 +1,23 @@
 # tests/test_world_spawning.py
 import pytest
-import random
 from unittest.mock import patch
 
-from domain.world import World, TILES
 from domain.rice import Rice
 from domain.human import Human
+from domain.world import TILES
+
+
+# The 'world_with_fixed_map' fixture is now global.
+# We just need to add the fixed grid data inside the test.
+from domain.world import TILES
 
 
 @pytest.fixture
-def world_with_fixed_map():
-    """Creates a world with a predictable map for testing."""
-    # We create an instance but will override its grid
-    world = World(width=5, height=5, tile_size=10)
+def spawning_world(world_factory):
+    """Creates a 5x5 world with a predictable map for spawning tests."""
+    world = world_factory(width=5, height=5)
 
-    # Grid layout:
-    # W W W W W
-    # W L L L W
-    # W L M L W   (M = Mountain)
-    # W L L L W
-    # W W W W W
-
+    # Define the grid layout
     fixed_grid = [
         [TILES["water"]] * 5,
         [TILES["water"], TILES["land"], TILES["land"], TILES["land"], TILES["water"]],
@@ -34,33 +31,23 @@ def world_with_fixed_map():
         [TILES["water"], TILES["land"], TILES["land"], TILES["land"], TILES["water"]],
         [TILES["water"]] * 5,
     ]
+    # Set the grid on the correctly-sized world object
     world.grid = fixed_grid
     return world
 
 
 class TestNaturalSpawning:
-    def test_rice_spawns_on_valid_tile(self, world_with_fixed_map):
-        """
-        GIVEN a world with land next to water,
-        WHEN a spawning tick occurs with a 100% chance,
-        THEN a new Rice plant should appear on a valid tile.
-        """
-        # GIVEN
-        world = world_with_fixed_map
+    def test_rice_spawns_on_valid_tile(self, spawning_world):
+        world = spawning_world
         assert len(world.entities) == 0
 
-        # We "patch" random.random to always return 0.0, ensuring a spawn happens
         with patch("random.random", return_value=0.0):
-            # WHEN
             world.natural_spawning_tick()
 
-        # THEN
         assert len(world.entities) == 1
         new_entity = world.entities[0]
         assert isinstance(new_entity, Rice)
 
-        # Check that it spawned on a valid land tile next to water.
-        # Valid coordinates are: (1,1), (1,2), (1,3), (2,1), (2,3), (3,1), (3,2), (3,3)
         entity_grid_pos = (
             int(new_entity.position[0] / world.tile_size_meters),
             int(new_entity.position[1] / world.tile_size_meters),
@@ -77,26 +64,14 @@ class TestNaturalSpawning:
         }
         assert entity_grid_pos in valid_spawn_points
 
-    def test_rice_does_not_spawn_if_chance_fails(self, world_with_fixed_map):
-        """
-        GIVEN a world with valid spawn points,
-        WHEN the random chance is too high (fails),
-        THEN no Rice should spawn.
-        """
-        # We "patch" random.random to always return 0.99, which is higher than the spawn chance
+    def test_rice_does_not_spawn_if_chance_fails(self, spawning_world):
         with patch("random.random", return_value=0.99):
-            world_with_fixed_map.natural_spawning_tick()
+            spawning_world.natural_spawning_tick()
 
-        assert len(world_with_fixed_map.entities) == 0
+        assert len(spawning_world.entities) == 0
 
-    def test_rice_does_not_spawn_on_occupied_tiles(self, world_with_fixed_map):
-        """
-        GIVEN all valid spawn points are occupied,
-        WHEN a spawning tick occurs,
-        THEN no new Rice should spawn.
-        """
-        world = world_with_fixed_map
-        # Manually occupy all valid land tiles
+    def test_rice_does_not_spawn_on_occupied_tiles(self, spawning_world, human_config):
+        world = spawning_world
         valid_spawn_points = [
             (1, 1),
             (2, 1),
@@ -110,11 +85,12 @@ class TestNaturalSpawning:
         for x, y in valid_spawn_points:
             pos_x = (x + 0.5) * world.tile_size_meters
             pos_y = (y + 0.5) * world.tile_size_meters
-            world.entities.append(Human(pos_x, pos_y))  # Occupy with Humans
+            # Pass the required config arguments to Human
+            world.entities.append(Human(pos_x, pos_y, **human_config))
 
         initial_entity_count = len(world.entities)
 
-        with patch("random.random", return_value=0.0):  # 100% chance
+        with patch("random.random", return_value=0.0):
             world.natural_spawning_tick()
 
         assert len(world.entities) == initial_entity_count

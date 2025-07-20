@@ -5,26 +5,23 @@ import threading
 import queue
 import sys
 import traceback
+from application.config import config
 
 # --- Platform-specific and input handling code remains the same ---
 # (NonBlockingInput class, ON_WINDOWS check, etc.)
-try:
-    import tty, termios, select
-
-    ON_WINDOWS = False
-except ImportError:
+if sys.platform == "win32":
     import msvcrt
-
-    ON_WINDOWS = True
+else:
+    import tty, termios, select
 
 # --- All game logic has been moved. We now import our service ---
 from application.game_service import GameService
 
 # --- Game Configuration ---
-GRID_WIDTH = 64
-GRID_HEIGHT = 32
-TICK_SECONDS = 1
-TILE_SIZE_METERS = 10
+GRID_WIDTH = config.get("simulation", "grid_width")
+GRID_HEIGHT = config.get("simulation", "grid_height")
+TICK_SECONDS = config.get("simulation", "tick_seconds")
+TILE_SIZE_METERS = config.get("simulation", "tile_size_meters")
 CLEAR_METHOD = "ansi"
 
 
@@ -32,12 +29,12 @@ CLEAR_METHOD = "ansi"
 class NonBlockingInput:
     # ... (identical to original)
     def __init__(self):
-        if not ON_WINDOWS:
+        if not sys.platform == "win32":
             self.old_settings = termios.tcgetattr(sys.stdin)
             tty.setcbreak(sys.stdin.fileno())
 
     def get_char(self):
-        if ON_WINDOWS:
+        if sys.platform == "win32":
             if msvcrt.kbhit():
                 return msvcrt.getch().decode("utf-8")
             return None
@@ -47,7 +44,7 @@ class NonBlockingInput:
             return None
 
     def restore_terminal(self):
-        if not ON_WINDOWS:
+        if not sys.platform == "win32":
             termios.tcsetattr(sys.stdin, termios.TCSADRAIN, self.old_settings)
 
 
@@ -58,7 +55,7 @@ def input_handler(command_queue, shared_state):
         while True:
             # This logic for handling raw keys is a presentation concern and stays here
             # ... (identical logic for Windows/Linux)
-            if ON_WINDOWS:
+            if sys.platform == "win32":
                 if msvcrt.kbhit():
                     byte = msvcrt.getch()
                     if byte in (b"\xe0", b"\x00"):
@@ -203,8 +200,11 @@ def game_loop(game_service, command_queue, shared_state):
 
 
 if __name__ == "__main__":
-    if ON_WINDOWS:
+    if sys.platform == "win32":
         os.system("")
+        print("platform: win32")
+    else:
+        print("platform: unix")
 
     shared_state = {"input_buffer": [], "cursor_pos": 0, "lock": threading.Lock()}
     cmd_queue = queue.Queue()

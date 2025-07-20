@@ -1,0 +1,21 @@
+{
+  "simulation": {
+    "grid_width": 64,
+    "grid_height": 32,
+    "tick_seconds": 1,
+    "tile_size_meters": 10
+  },
+  "entities": {
+    "human": {
+      "max_age": 1200,
+      "move_speed": 3,
+      "max_saturation": 100,
+      "hungry_threshold": 40
+    },
+    "rice": {
+      "max_age": 16,
+      "natural_spawn_chance": 0.5,
+      "saturation_yield": 50
+    }
+  }
+}

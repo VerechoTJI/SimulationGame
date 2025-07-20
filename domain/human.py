@@ -5,14 +5,21 @@ from .rice import Rice
 
 
 class Human(Entity):
-    def __init__(self, pos_x, pos_y):
-        super().__init__("Human", "H", pos_x, pos_y, max_age=1200)
-        self.move_speed = 1.4
+    def __init__(
+        self,
+        pos_x,
+        pos_y,
+        max_age: int,
+        move_speed: float,
+        max_saturation: int,
+        hungry_threshold: int,
+    ):
+        super().__init__("Human", "H", pos_x, pos_y, max_age=max_age)
+        self.move_speed = move_speed
         self.path = []
-        # --- NEW: Saturation Attributes ---
-        self.max_saturation = 100
+        self.max_saturation = max_saturation
         self.saturation = self.max_saturation
-        self.is_hungry_threshold = 40
+        self.is_hungry_threshold = hungry_threshold
 
     # --- MODIFIED: is_alive() now checks saturation ---
     def is_alive(self):
@@ -24,10 +31,16 @@ class Human(Entity):
         return self.saturation < self.is_hungry_threshold
 
     # --- NEW: Eating action ---
-    def eat(self, rice_plant, saturation_gain=50):
-        """Increases saturation and replants the rice."""
-        self.saturation = min(self.max_saturation, self.saturation + saturation_gain)
-        rice_plant.replant()
+    def eat(self, eatable_entity):
+        # Assumes the entity has a 'saturation_yield' and a 'replant' or similar method.
+        # This is a form of "duck typing".
+        if hasattr(eatable_entity, "saturation_yield") and callable(
+            getattr(eatable_entity, "replant", None)
+        ):
+            self.saturation = min(
+                self.max_saturation, self.saturation + eatable_entity.saturation_yield
+            )
+            eatable_entity.replant()
 
     def _find_food_and_path(self, world):
         """Finds the nearest mature rice and sets a path to it."""
@@ -63,11 +76,8 @@ class Human(Entity):
         super().tick(world)
         self.saturation -= 1
         if not self.is_alive():
-            return  # No further actions if dead
+            return
 
-        # --- AI Decision Making ---
-
-        # Priority 1: EAT if hungry and next to food.
         if self.is_hungry():
             eat_distance = world.tile_size_meters * 1.5
             for entity in world.entities:
@@ -76,10 +86,10 @@ class Human(Entity):
                         world.add_log(
                             f"{Colors.GREEN}{self.name} ate {entity.name}.{Colors.RESET}"
                         )
+                        # --- CLEANER: Just tell the human to eat the entity ---
                         self.eat(entity)
-                        self.path = []  # Clear path after eating.
-                        # After eating, the turn is over. Do not move or plan.
-                        return  # <--- KEY FIX: Exit the tick method.
+                        self.path = []
+                        return
 
         # Priority 2: PLAN a path if one is needed.
         # This block is now only reached if the human did NOT eat this tick.
