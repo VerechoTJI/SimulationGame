@@ -49,47 +49,117 @@ def input_handler(command_queue, shared_state):
     nb_input = NonBlockingInput()
     try:
         while True:
+            # --- PLATFORM-SPECIFIC KEY HANDLING ---
+            key_code = None
             if sys.platform == "win32":
                 if msvcrt.kbhit():
                     byte = msvcrt.getch()
                     if byte in (b"\xe0", b"\x00"):
                         second_byte = msvcrt.getch()
-                        with shared_state["lock"]:
-                            if second_byte == b"K":
-                                shared_state["cursor_pos"] = max(
-                                    0, shared_state["cursor_pos"] - 1
-                                )
-                            elif second_byte == b"M":
-                                shared_state["cursor_pos"] = min(
-                                    len(shared_state["input_buffer"]),
-                                    shared_state["cursor_pos"] + 1,
-                                )
-                        continue
-                    with shared_state["lock"]:
-                        if byte == b"\r":
-                            command = "".join(shared_state["input_buffer"])
-                            if command:
-                                command_queue.put(command)
+                        # Map Windows key codes to a common format
+                        if second_byte == b"H":
+                            key_code = "UP"
+                        elif second_byte == b"P":
+                            key_code = "DOWN"
+                        elif second_byte == b"K":
+                            key_code = "LEFT"
+                        elif second_byte == b"M":
+                            key_code = "RIGHT"
+                    elif byte == b"\r":
+                        key_code = "ENTER"
+                    elif byte == b"\x08":
+                        key_code = "BACKSPACE"
+                    else:
+                        try:
+                            key_code = byte.decode("utf-8")
+                        except UnicodeDecodeError:
+                            pass
+            else:  # Unix-like systems (Linux, macOS)
+                char = nb_input.get_char()
+                if char:
+                    # Handle ANSI escape sequences for arrow keys
+                    if char == "\x1b":
+                        if nb_input.get_char() == "[":
+                            arrow_key = nb_input.get_char()
+                            if arrow_key == "A":
+                                key_code = "UP"
+                            elif arrow_key == "B":
+                                key_code = "DOWN"
+                            elif arrow_key == "C":
+                                key_code = "RIGHT"
+                            elif arrow_key == "D":
+                                key_code = "LEFT"
+                    elif char in ("\n", "\r"):
+                        key_code = "ENTER"
+                    elif char == "\x7f":
+                        key_code = "BACKSPACE"
+                    else:
+                        key_code = char
+
+            if not key_code:
+                time.sleep(0.01)
+                continue
+
+            # --- UNIFIED INPUT PROCESSING LOGIC ---
+            with shared_state["lock"]:
+                history = shared_state["command_history"]
+
+                if key_code == "UP":
+                    if history:
+                        # Decrement index, stopping at the first command
+                        shared_state["history_index"] = max(
+                            0, shared_state["history_index"] - 1
+                        )
+                        command = history[shared_state["history_index"]]
+                        shared_state["input_buffer"] = list(command)
+                        shared_state["cursor_pos"] = len(command)
+
+                elif key_code == "DOWN":
+                    if history:
+                        # Increment index, stopping at the new command line
+                        shared_state["history_index"] = min(
+                            len(history), shared_state["history_index"] + 1
+                        )
+                        if shared_state["history_index"] == len(history):
+                            # We've reached the end, show a new empty line
                             shared_state["input_buffer"].clear()
                             shared_state["cursor_pos"] = 0
-                        elif byte == b"\x08":
-                            cursor = shared_state["cursor_pos"]
-                            if cursor > 0:
-                                shared_state["input_buffer"].pop(cursor - 1)
-                                shared_state["cursor_pos"] = cursor - 1
                         else:
-                            try:
-                                char = byte.decode("utf-8")
-                                if char.isprintable():
-                                    cursor = shared_state["cursor_pos"]
-                                    shared_state["input_buffer"].insert(cursor, char)
-                                    shared_state["cursor_pos"] = cursor + 1
-                            except UnicodeDecodeError:
-                                pass
-            else:
-                # Basic Linux input for arrow keys and special keys would go here
-                pass
-            time.sleep(0.01)
+                            command = history[shared_state["history_index"]]
+                            shared_state["input_buffer"] = list(command)
+                            shared_state["cursor_pos"] = len(command)
+
+                elif key_code == "LEFT":
+                    shared_state["cursor_pos"] = max(0, shared_state["cursor_pos"] - 1)
+
+                elif key_code == "RIGHT":
+                    shared_state["cursor_pos"] = min(
+                        len(shared_state["input_buffer"]),
+                        shared_state["cursor_pos"] + 1,
+                    )
+
+                elif key_code == "ENTER":
+                    command = "".join(shared_state["input_buffer"])
+                    if command:
+                        command_queue.put(command)
+                        # Add to history and reset history index to point to the new empty line
+                        if not history or history[-1] != command:
+                            history.append(command)
+                        shared_state["history_index"] = len(history)
+
+                    shared_state["input_buffer"].clear()
+                    shared_state["cursor_pos"] = 0
+
+                elif key_code == "BACKSPACE":
+                    cursor = shared_state["cursor_pos"]
+                    if cursor > 0:
+                        shared_state["input_buffer"].pop(cursor - 1)
+                        shared_state["cursor_pos"] = cursor - 1
+
+                elif key_code and len(key_code) == 1 and key_code.isprintable():
+                    cursor = shared_state["cursor_pos"]
+                    shared_state["input_buffer"].insert(cursor, key_code)
+                    shared_state["cursor_pos"] = cursor + 1
     finally:
         nb_input.restore_terminal()
 
@@ -123,7 +193,9 @@ def display(render_data, current_input_list, cursor_pos):
 
     human_statuses = render_data.get("human_statuses", [])
     if not human_statuses:
-        right_panel_lines.append("No humans in the world.")
+        # Fill the rest of the panel with blank lines to maintain alignment
+        for _ in range(map_height - len(right_panel_lines)):
+            right_panel_lines.append("")
     else:
         human_statuses.sort()
         # --- 1. Calculate column properties based on available width ---
@@ -132,36 +204,37 @@ def display(render_data, current_input_list, cursor_pos):
         col_separator = " | "
         max_cols = max(1, available_width // (base_col_width + len(col_separator)))
 
-        # --- 2. Calculate display capacity and truncate if necessary ---
-        # The panel is strictly constrained by the map's height.
-        display_capacity = map_height * max_cols - 3
-        display_list = human_statuses
+        # --- 2. Correctly calculate display capacity ---
+        # The panel is strictly constrained by the map's height minus the header.
+        data_rows = map_height - 3
+        if data_rows <= 0:
+            # Not enough space to display any data. Panel is already full.
+            display_list = []
+        else:
+            display_capacity = data_rows * max_cols
+            display_list = human_statuses
 
-        if len(human_statuses) > display_capacity:
-            # Reserve the last slot for the summary message
-            num_to_show = display_capacity - 1
-            num_hidden = len(human_statuses) - num_to_show
+            if len(human_statuses) > display_capacity:
+                # Reserve the last slot for the summary message
+                num_to_show = display_capacity - 1
+                num_hidden = len(human_statuses) - num_to_show
+                display_list = human_statuses[:num_to_show]
 
-            # Slice the list to make room for the summary
-            display_list = human_statuses[:num_to_show]
+                summary_msg = f"+{num_hidden} more"
+                if get_visible_length(summary_msg) > base_col_width:
+                    num_digits = max(1, base_col_width - 7)
+                    max_num = 10**num_digits - 1
+                    summary_msg = f"+>{max_num} more"
 
-            # Generate the robust summary message
-            summary_msg = f"+{num_hidden} more"
-            if get_visible_length(summary_msg) > base_col_width:
-                num_digits = max(1, base_col_width - 7)
-                max_num = 10**num_digits - 1
-                summary_msg = f"+>{max_num} more"
+                display_list.append(summary_msg)
 
-            # Append the summary message to the final display list
-            display_list.append(summary_msg)
-
-        # --- 3. Build the multi-column rows, now constrained to map_height ---
-        # We iterate exactly map_height times to build the rows.
-        for i in range(map_height):
+        # --- 3. Correctly build the multi-column rows ---
+        # We iterate exactly data_rows times.
+        for i in range(data_rows):
             row_parts = []
             for j in range(max_cols):
                 # Correct index for a 'down-then-across' fill order
-                item_index = i + j * map_height
+                item_index = i + j * data_rows
                 if item_index < len(display_list):
                     item = display_list[item_index]
                     padding = " " * (base_col_width - get_visible_length(item))
@@ -283,7 +356,13 @@ if __name__ == "__main__":
     else:
         print("platform: unix")
 
-    shared_state = {"input_buffer": [], "cursor_pos": 0, "lock": threading.Lock()}
+    shared_state = {
+        "input_buffer": [],
+        "cursor_pos": 0,
+        "lock": threading.Lock(),
+        "command_history": [],
+        "history_index": -1,  # -1 indicates we are not currently browsing history
+    }
     cmd_queue = queue.Queue()
     game_service = GameService(GRID_WIDTH, GRID_HEIGHT, TILE_SIZE_METERS)
     game_service.initialize_world()
