@@ -82,6 +82,28 @@ class World:
                 f"{Colors.RED}Unknown entity type: {entity_type}{Colors.RESET}"
             )
 
+    def find_nearest_entity(self, origin_pos, entity_type, predicate=None):
+        """
+        Finds the closest entity of a given type to a position that satisfies a predicate.
+        """
+        closest_entity = None
+        min_dist_sq = float("inf")
+
+        for entity in self.entities:
+            # Check if it's the right type
+            if isinstance(entity, entity_type):
+                # If there's a predicate, check if the entity satisfies it
+                if predicate and not predicate(entity):
+                    continue  # Skip if it doesn't meet the condition
+
+                # If we get here, the entity is a valid candidate
+                dist_sq = np.sum((entity.position - origin_pos) ** 2)
+                if dist_sq < min_dist_sq:
+                    min_dist_sq = dist_sq
+                    closest_entity = entity
+
+        return closest_entity
+
     def find_path(self, start_pos, end_pos):
         # ... (Method is identical to original)
         def get_move_cost(grid_pos):
@@ -134,15 +156,20 @@ class World:
         return None
 
     def game_tick(self):
-        # ... (Method is identical to original)
         self.tick_count += 1
         if self.entities:
             for entity in list(self.entities):
                 entity.tick(self)
+
         dead_entities = [e for e in self.entities if not e.is_alive()]
         if dead_entities:
             for entity in dead_entities:
+                death_reason = "of old age"
+                # Check if the entity is a Human before checking its attributes
+                if isinstance(entity, Human) and entity.saturation <= 0:
+                    death_reason = "from starvation"
+
                 self.add_log(
-                    f"{Colors.RED}{entity.name} has died of old age.{Colors.RESET}"
+                    f"{Colors.RED}{entity.name} has died {death_reason}.{Colors.RESET}"
                 )
                 self.entities.remove(entity)
