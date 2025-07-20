@@ -33,6 +33,53 @@ class World:
         self.entities = []
         self.tick_count = 0
         self.log_messages = []
+        self.rice_spawn_chance_per_tick = 0.5  # 10% chance per game tick
+
+    def natural_spawning_tick(self):
+        # Rule: Only attempt to spawn if the random chance succeeds.
+        if random.random() > self.rice_spawn_chance_per_tick:
+            return
+
+        valid_spawn_tiles = []
+        occupied_tiles = {
+            (
+                int(e.position[0] / self.tile_size_meters),
+                int(e.position[1] / self.tile_size_meters),
+            )
+            for e in self.entities
+        }
+
+        # Iterate through all grid cells to find valid spawn points
+        for y in range(self.height):
+            for x in range(self.width):
+                # Rule: Must be a 'land' tile and must not be occupied.
+                if self.grid[y][x].name == "Land" and (x, y) not in occupied_tiles:
+                    # Check all 8 neighbors for a 'water' tile.
+                    is_adjacent_to_water = False
+                    for dy in [-1, 0, 1]:
+                        for dx in [-1, 0, 1]:
+                            if dx == 0 and dy == 0:
+                                continue
+
+                            nx, ny = x + dx, y + dy
+                            if 0 <= nx < self.width and 0 <= ny < self.height:
+                                if self.grid[ny][nx].name == "Water":
+                                    is_adjacent_to_water = True
+                                    break
+                        if is_adjacent_to_water:
+                            break
+
+                    if is_adjacent_to_water:
+                        valid_spawn_tiles.append((x, y))
+
+        # Rule: If there are any valid places to spawn, pick one at random.
+        if valid_spawn_tiles:
+            spawn_x, spawn_y = random.choice(valid_spawn_tiles)
+            self.spawn_entity("rice", spawn_x, spawn_y)
+            # Override the default spawn log with a more descriptive one
+            self.log_messages[-1] = (
+                f"{Colors.GREEN}A new Rice plant sprouted at ({spawn_x}, {spawn_y}).{Colors.RESET}"
+            )
 
     def add_log(self, message):
         self.log_messages.append(message)
@@ -157,15 +204,20 @@ class World:
 
     def game_tick(self):
         self.tick_count += 1
+
+        # Handle natural world events first
+        self.natural_spawning_tick()
+
+        # Then, tick all entities
         if self.entities:
             for entity in list(self.entities):
                 entity.tick(self)
 
+        # Finally, handle deaths
         dead_entities = [e for e in self.entities if not e.is_alive()]
         if dead_entities:
             for entity in dead_entities:
                 death_reason = "of old age"
-                # Check if the entity is a Human before checking its attributes
                 if isinstance(entity, Human) and entity.saturation <= 0:
                     death_reason = "from starvation"
 
