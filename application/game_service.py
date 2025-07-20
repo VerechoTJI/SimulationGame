@@ -60,8 +60,8 @@ class GameService:
 
                     # Create a formatted status string for the UI
                     human_statuses.append(
-                        f"{color}{entity.name:<10s}{Colors.RESET} "
-                        f"| Sat: {entity.saturation:>3}/{entity.max_saturation}"
+                        f"{color}{entity.name:<10s}{Colors.RESET}"
+                        f" Sat: {entity.saturation:>3}/{entity.max_saturation}"
                     )
                 elif isinstance(entity, Rice):
                     # Change Rice color based on maturity

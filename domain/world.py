@@ -135,7 +135,7 @@ class World:
 
     def add_log(self, message):
         self.log_messages.append(message)
-        if len(self.log_messages) > 10:
+        if len(self.log_messages) > 99:
             self.log_messages.pop(0)
 
     def _generate_map(self):
