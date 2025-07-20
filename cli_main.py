@@ -150,7 +150,12 @@ def display(render_data, current_input_list, cursor_pos):
     final_output = "\n".join(output_buffer)
 
     if CLEAR_METHOD == "ansi":
-        sys.stdout.write("\033[H\033[J" + final_output)
+        # This ANSI sequence provided the most reliable flicker-free clear.
+        # \033[H   - Move cursor to top-left
+        # \033[3J  - Clear scrollback buffer
+        # \033[J   - Clear screen from cursor to end
+        sys.stdout.write("\033[H\033[3J\033[J" + final_output)
+
     else:
         os.system("cls")
         sys.stdout.write(final_output)
