@@ -2,8 +2,13 @@
   "simulation": {
     "grid_width": 64,
     "grid_height": 32,
-    "tick_seconds": 0.3,
+    "tick_seconds": 0.01666,
     "tile_size_meters": 10
+  },
+  "controls": {
+    "speed_adjust_factor": 2,
+    "min_tick_seconds": 0.01666,
+    "max_tick_seconds": 2.0
   },
   "entities": {
     "human": {
@@ -20,8 +25,8 @@
     },
     "rice": {
       "attributes": {
-        "max_age": 60,
-        "saturation_yield": 100
+        "max_age": 36,
+        "saturation_yield": 50
       },
       "spawning": {
         "natural_spawn_chance": 0.8

@@ -49,14 +49,13 @@ def input_handler(command_queue, shared_state):
     nb_input = NonBlockingInput()
     try:
         while True:
-            # --- PLATFORM-SPECIFIC KEY HANDLING ---
+            # --- PLATFORM-SPECIFIC KEY HANDLING (Code is identical to before) ---
             key_code = None
             if sys.platform == "win32":
                 if msvcrt.kbhit():
                     byte = msvcrt.getch()
                     if byte in (b"\xe0", b"\x00"):
                         second_byte = msvcrt.getch()
-                        # Map Windows key codes to a common format
                         if second_byte == b"H":
                             key_code = "UP"
                         elif second_byte == b"P":
@@ -74,10 +73,9 @@ def input_handler(command_queue, shared_state):
                             key_code = byte.decode("utf-8")
                         except UnicodeDecodeError:
                             pass
-            else:  # Unix-like systems (Linux, macOS)
+            else:
                 char = nb_input.get_char()
                 if char:
-                    # Handle ANSI escape sequences for arrow keys
                     if char == "\x1b":
                         if nb_input.get_char() == "[":
                             arrow_key = nb_input.get_char()
@@ -100,62 +98,70 @@ def input_handler(command_queue, shared_state):
                 time.sleep(0.01)
                 continue
 
-            # --- UNIFIED INPUT PROCESSING LOGIC ---
+            # --- MODIFIED: UNIFIED INPUT PROCESSING LOGIC ---
             with shared_state["lock"]:
                 history = shared_state["command_history"]
 
+                # --- NEW: Context-sensitive hotkey handling ---
+                # Hotkeys only work if the input buffer is empty.
+                if len(shared_state["input_buffer"]) == 0:
+                    hotkey_pressed = True
+                    if key_code.lower() == "p":
+                        command_queue.put("__PAUSE_TOGGLE__")
+                    elif key_code.lower() == "n":
+                        command_queue.put("__FORCE_TICK__")
+                    elif key_code in ("=", "+"):
+                        command_queue.put("__SPEED_UP__")
+                    elif key_code == "-":
+                        command_queue.put("__SPEED_DOWN__")
+                    else:
+                        hotkey_pressed = False
+
+                    if hotkey_pressed:
+                        continue  # Skip the rest of the processing
+
+                # --- Existing logic for text entry and command history ---
                 if key_code == "UP":
                     if history:
-                        # Decrement index, stopping at the first command
                         shared_state["history_index"] = max(
                             0, shared_state["history_index"] - 1
                         )
                         command = history[shared_state["history_index"]]
                         shared_state["input_buffer"] = list(command)
                         shared_state["cursor_pos"] = len(command)
-
                 elif key_code == "DOWN":
                     if history:
-                        # Increment index, stopping at the new command line
                         shared_state["history_index"] = min(
                             len(history), shared_state["history_index"] + 1
                         )
                         if shared_state["history_index"] == len(history):
-                            # We've reached the end, show a new empty line
                             shared_state["input_buffer"].clear()
                             shared_state["cursor_pos"] = 0
                         else:
                             command = history[shared_state["history_index"]]
                             shared_state["input_buffer"] = list(command)
                             shared_state["cursor_pos"] = len(command)
-
                 elif key_code == "LEFT":
                     shared_state["cursor_pos"] = max(0, shared_state["cursor_pos"] - 1)
-
                 elif key_code == "RIGHT":
                     shared_state["cursor_pos"] = min(
                         len(shared_state["input_buffer"]),
                         shared_state["cursor_pos"] + 1,
                     )
-
                 elif key_code == "ENTER":
                     command = "".join(shared_state["input_buffer"])
                     if command:
                         command_queue.put(command)
-                        # Add to history and reset history index to point to the new empty line
                         if not history or history[-1] != command:
                             history.append(command)
                         shared_state["history_index"] = len(history)
-
                     shared_state["input_buffer"].clear()
                     shared_state["cursor_pos"] = 0
-
                 elif key_code == "BACKSPACE":
                     cursor = shared_state["cursor_pos"]
                     if cursor > 0:
                         shared_state["input_buffer"].pop(cursor - 1)
                         shared_state["cursor_pos"] = cursor - 1
-
                 elif key_code and len(key_code) == 1 and key_code.isprintable():
                     cursor = shared_state["cursor_pos"]
                     shared_state["input_buffer"].insert(cursor, key_code)
@@ -177,91 +183,79 @@ def display(render_data, current_input_list, cursor_pos):
     map_height = len(map_grid)
     terminal_width, terminal_height = os.get_terminal_size()
 
-    # --- Map width calculation is unchanged ---
+    # --- NEW: Dynamic title based on simulation state ---
+    status = "PAUSED" if render_data.get("is_paused", False) else "RUNNING"
+    base_tick = render_data.get("base_tick_seconds", 0.3)
+    current_tick = render_data.get("tick_seconds", 0.3)
+    speed_multiplier = base_tick / current_tick
+    title_status = f"Status: {status} | Speed: {speed_multiplier:.2f}x"
+    title_text = "--- Simulation Game ---"
+    title_line = f"{title_text} | {title_status}"
+
     map_width_chars = 0
     if map_height > 0 and len(map_grid[0]) > 0:
         first_row_string = " ".join(map_grid[0])
         map_width_chars = get_visible_length(first_row_string)
 
-    # --- REFACTORED DYNAMIC STATUS PANEL ---
+    # --- The dynamic status panel for humans is unchanged ---
     right_panel_lines = []
     right_panel_lines.append(
         f"Tick: {render_data['tick']} | Entities: {render_data['entity_count']}"
     )
     right_panel_lines.append("")
     right_panel_lines.append("--- Humans ---")
-
     human_statuses = render_data.get("human_statuses", [])
     if not human_statuses:
-        # Fill the rest of the panel with blank lines to maintain alignment
         for _ in range(map_height - len(right_panel_lines)):
             right_panel_lines.append("")
     else:
         human_statuses.sort()
-        # --- 1. Calculate column properties based on available width ---
         available_width = terminal_width - map_width_chars - 3
         base_col_width = max(get_visible_length(s) for s in human_statuses)
         col_separator = " | "
         max_cols = max(1, available_width // (base_col_width + len(col_separator)))
-
-        # --- 2. Correctly calculate display capacity ---
-        # The panel is strictly constrained by the map's height minus the header.
         data_rows = map_height - 3
         if data_rows <= 0:
-            # Not enough space to display any data. Panel is already full.
             display_list = []
         else:
             display_capacity = data_rows * max_cols
             display_list = human_statuses
-
             if len(human_statuses) > display_capacity:
-                # Reserve the last slot for the summary message
                 num_to_show = display_capacity - 1
                 num_hidden = len(human_statuses) - num_to_show
                 display_list = human_statuses[:num_to_show]
-
                 summary_msg = f"+{num_hidden} more"
                 if get_visible_length(summary_msg) > base_col_width:
                     num_digits = max(1, base_col_width - 7)
                     max_num = 10**num_digits - 1
                     summary_msg = f"+>{max_num} more"
-
                 display_list.append(summary_msg)
-
-        # --- 3. Correctly build the multi-column rows ---
-        # We iterate exactly data_rows times.
         for i in range(data_rows):
             row_parts = []
             for j in range(max_cols):
-                # Correct index for a 'down-then-across' fill order
                 item_index = i + j * data_rows
                 if item_index < len(display_list):
                     item = display_list[item_index]
                     padding = " " * (base_col_width - get_visible_length(item))
                     row_parts.append(item + padding)
                 else:
-                    # Pad with empty space if this slot is empty
                     row_parts.append(" " * base_col_width)
             right_panel_lines.append(col_separator.join(row_parts))
 
-    # --- The rest of the function remains the same ---
-
-    # Build the top part of the screen
-    output_buffer.append("--- Simulation Game (DDD Refactor) ---")
-    # This loop is now simpler, as right_panel_lines is guaranteed to be the right height
+    # --- Build the screen using the new title ---
+    output_buffer.append(title_line)  # <-- MODIFIED
     for i in range(map_height):
         map_part = " ".join(map_grid[i]) + Colors.RESET
         status_part = right_panel_lines[i] if i < len(right_panel_lines) else ""
         output_buffer.append(f"{map_part} | {status_part}")
 
-    output_buffer.append("-" * map_width_chars)
+    output_buffer.append("-" * (map_width_chars + 1))
 
-    # Dynamic Log Rendering logic is unchanged
+    # --- Log rendering logic is unchanged ---
     lines_used_so_far = len(output_buffer)
     footer_lines_needed = 3
     available_log_lines = terminal_height - lines_used_so_far - footer_lines_needed
     available_log_lines = max(0, available_log_lines)
-
     all_logs = render_data.get("logs", [])
     display_logs = []
     if available_log_lines > 0 and len(all_logs) > available_log_lines:
@@ -272,17 +266,19 @@ def display(render_data, current_input_list, cursor_pos):
         display_logs.extend(most_recent_logs)
     else:
         display_logs = all_logs[-available_log_lines:]
-
     output_buffer.append("--- Log ---")
     output_buffer.extend(display_logs)
-
     current_buffer_len = len(output_buffer)
     padding_needed = terminal_height - current_buffer_len - footer_lines_needed + 1
     for _ in range(max(0, padding_needed)):
         output_buffer.append("")
 
-    # Footer and Prompt logic is unchanged
-    output_buffer.append(f"Commands: sp [human|rice] [x] [y] | q to quit")
+    # --- MODIFIED: Updated help text in footer ---
+    output_buffer.append(
+        f"Hotkeys: p(pause) n(next) +/-(speed) | Cmd: sp <type> <x> <y> | q(quit)"
+    )
+
+    # Prompt logic is unchanged
     prompt_parts = ["> "]
     for i, char in enumerate(current_input_list):
         if i == cursor_pos:
@@ -293,7 +289,7 @@ def display(render_data, current_input_list, cursor_pos):
         prompt_parts.append(f"\033[7m \033[27m")
     output_buffer.append("".join(prompt_parts))
 
-    # Definitive flicker/residue-free rendering logic is unchanged
+    # Rendering logic is unchanged
     if CLEAR_METHOD == "ansi":
         write_buffer = []
         write_buffer.append("\033[?25l")
@@ -303,7 +299,6 @@ def display(render_data, current_input_list, cursor_pos):
             write_buffer.append("\033[K")
             if i < len(output_buffer) - 1:
                 write_buffer.append("\n")
-
         write_buffer.append("\033[J")
         write_buffer.append("\033[?25h")
         sys.stdout.write("".join(write_buffer))
@@ -318,6 +313,7 @@ def game_loop(game_service, command_queue, shared_state):
     last_tick_time = time.time()
     try:
         while True:
+            # Process any commands from the queue
             try:
                 command = command_queue.get_nowait()
                 if command.lower() in ["q", "quit", "exit"]:
@@ -326,19 +322,24 @@ def game_loop(game_service, command_queue, shared_state):
             except queue.Empty:
                 pass
 
+            # First, get the most up-to-date state from the service
+            render_data = game_service.get_render_data()
+            current_tick_seconds = render_data["tick_seconds"]
+
+            # Then, check if it's time for the next automatic tick
             current_time = time.time()
-            if current_time - last_tick_time >= TICK_SECONDS:
-                game_service.tick()
+            if current_time - last_tick_time >= current_tick_seconds:
+                game_service.tick()  # This call respects the pause state internally
                 last_tick_time = current_time
 
+            # Get user input state and render the display
             with shared_state["lock"]:
                 current_input_list = list(shared_state["input_buffer"])
                 cursor_pos = shared_state["cursor_pos"]
 
-            render_data = game_service.get_render_data()
             display(render_data, current_input_list, cursor_pos)
 
-            time.sleep(0.1)
+            time.sleep(0.05)  # A short sleep to prevent busy-waiting
     except Exception as e:
         nb_input_for_cleanup.restore_terminal()
         print("\n" * 5)
@@ -351,7 +352,7 @@ def game_loop(game_service, command_queue, shared_state):
 
 if __name__ == "__main__":
     if sys.platform == "win32":
-        os.system("")
+        os.system("cls")
         print("platform: win32")
     else:
         print("platform: unix")
