@@ -41,7 +41,6 @@ SimulationGame/
 │   ├── test_pathfinder.py
 │   ├── test_rice_logic.py
 │   ├── test_spawning_manager.py
-│   ├── test_world_logic.py
 │   └── test_world_helpers.py
 ├── cli_main.py                 # CLI entry point and presentation layer
 ├── config.json                 # Simulation parameters
