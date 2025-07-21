@@ -381,7 +381,7 @@ def game_loop(game_service, command_queue, shared_state):
             display(final_render_data, current_input_list, cursor_pos)
 
             # Sleep to target a stable render rate and prevent CPU busy-waiting
-            time.sleep(0.016)  # Target ~60fps
+            time.sleep(0.008)  # Max ~120fps
 
     except Exception as e:
         nb_input_for_cleanup.restore_terminal()
