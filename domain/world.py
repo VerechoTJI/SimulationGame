@@ -11,21 +11,6 @@ from .rice import Rice
 from .object_pool import ObjectPool
 
 
-class Tile:
-    def __init__(self, name, symbol, color, move_speed_factor):
-        self.name = name
-        self.symbol = symbol
-        self.color = color
-        self.tile_move_speed_factor = move_speed_factor
-
-
-TILES = {
-    "land": Tile("Land", ".", Colors.GREEN, 1.0),
-    "water": Tile("Water", "~", Colors.BLUE, 0.0),
-    "mountain": Tile("Mountain", "^", Colors.WHITE, 0.5),
-}
-
-
 class World:
     def __init__(self, width, height, tile_size, config_data: dict):
         self.width = width
