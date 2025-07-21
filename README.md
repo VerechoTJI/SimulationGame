@@ -18,22 +18,36 @@ A simple simulation game demonstrating Domain-Driven Design (DDD) principles in 
 SimulationGame/
 ├── application/
 │   ├── __init__.py
-│   └── game_service.py         # Application service layer
+│   ├── config.py               # Singleton config loader
+│   └── game_service.py         # Application service layer, simulation orchestrator
 ├── domain/
 │   ├── __init__.py
 │   ├── entity.py               # Base entity and color definitions
 │   ├── human.py                # Human entity logic
 │   ├── rice.py                 # Rice entity logic
+│   ├── object_pool.py          # Generic object pooling system
+│   ├── entity_manager.py       # Entity lifecycle manager
+│   ├── pathfinder.py           # A* pathfinding logic
+│   ├── spawning_manager.py     # Spawning and replanting logic
+│   ├── tile.py                 # Tile types and movement factors
 │   └── world.py                # World, map, and simulation logic
 ├── tests/
 │   ├── __init__.py
-│   ├── test_human_logic.py     # Human logic tests
-│   ├── test_rice_logic.py      # Rice logic tests
-│   ├── test_world_helpers.py   # World helper method tests
-│   └── test_world_spawning.py  # World spawning logic tests
-├── cli_main.py                 # CLI entry point
-├── requirements.txt            # Python dependencies
-└── README.md                   # Project documentation
+│   ├── conftest.py             # Global fixtures and config
+│   ├── test_domain_integration.py
+│   ├── test_entity_manager.py
+│   ├── test_human_logic.py
+│   ├── test_object_pool.py
+│   ├── test_pathfinder.py
+│   ├── test_rice_logic.py
+│   ├── test_spawning_manager.py
+│   ├── test_world_logic.py
+│   └── test_world_helpers.py
+├── cli_main.py                 # CLI entry point and presentation layer
+├── config.json                 # Simulation parameters
+├── requirements.txt
+├── README.md                   # You are here
+└── prompt.md                   # Project instructions and methodology
 ```
 
 ## Getting Started
