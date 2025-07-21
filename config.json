@@ -1,7 +1,7 @@
 {
   "simulation": {
-    "grid_width": 64,
-    "grid_height": 32,
+    "grid_width": 128,
+    "grid_height": 64,
     "tick_seconds": 0.01666,
     "tile_size_meters": 10
   },
