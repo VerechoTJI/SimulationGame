@@ -36,6 +36,7 @@ class World:
         self.entities = []
         self.tick_count = 0
         self.log_messages = []
+        self.replant_queue = []  # <-- ADD THIS LINE
         self.rice_spawn_chance_per_tick = self.get_config_value(
             "entities", "rice", "spawning", "natural_spawn_chance"
         )
@@ -90,14 +91,36 @@ class World:
             )
 
     def game_tick(self):
-        self.tick_count += 1
+        # Snapshot entities at the very beginning of the tick.
+        # Only these entities will perform actions and age this tick.
+        entities_to_process = list(self.entities)
+
+        # --- Spawning Phase ---
+        # New entities are added to self.entities but will not be in `entities_to_process`.
+
+        # 1. Process replanting from events of the PREVIOUS tick.
+        if self.replant_queue:
+            for x, y in self.replant_queue:
+                self.spawn_entity("rice", x, y)
+                # Overwrite the generic spawn message with a more specific one for clarity.
+                self.log_messages[-1] = (
+                    f"{Colors.GREEN}A new Rice plant was replanted at ({x}, {y}).{Colors.RESET}"
+                )
+            self.replant_queue.clear()
+
+        # 2. Process this tick's natural spawning.
         self.natural_spawning_tick()
 
+        # --- Action Phase ---
+        # This phase processes ONLY the entities that existed at the start of the tick.
+        self.tick_count += 1
         newly_born = []
 
-        if self.entities:
-            for entity in list(self.entities):
-                entity.tick(self)
+        for entity in entities_to_process:
+            if entity.is_alive():
+                entity.tick(self)  # Aging and other actions happen here.
+
+                # Handle Reproduction
                 if isinstance(entity, Human) and entity.can_reproduce():
                     parent_grid_pos = self.get_grid_position(entity.position)
                     spawn_grid_pos = self._find_adjacent_walkable_tile(parent_grid_pos)
@@ -113,13 +136,24 @@ class World:
                         self.add_log(
                             f"{Colors.MAGENTA}{entity.name} has given birth to {newborn.name}!{Colors.RESET}"
                         )
+
+        # Add newborns to the main list now that the action phase is over.
         if newly_born:
             self.entities.extend(newly_born)
 
-        # --- MODIFIED: Handle deaths using the object pool ---
+        # --- Cleanup Phase ---
+        # This must check ALL entities, as a newly spawned rice could theoretically
+        # be eaten by a Human in the same tick.
         removed_entities = [e for e in self.entities if not e.is_alive()]
         if removed_entities:
             for entity in removed_entities:
+                # If an eaten rice is removed, queue it for replanting on the NEXT tick.
+                if isinstance(entity, Rice) and entity.is_eaten:
+                    grid_pos = self.get_grid_position(entity.position)
+                    # This check prevents duplicate queueing in rare edge cases.
+                    if grid_pos not in self.replant_queue:
+                        self.replant_queue.append(grid_pos)
+
                 if isinstance(entity, Human):
                     death_reason = "of old age"
                     if entity.saturation <= 0:
@@ -127,11 +161,9 @@ class World:
                     self.add_log(
                         f"{Colors.RED}{entity.name} has died {death_reason}.{Colors.RESET}"
                     )
-                # No special log for eaten rice, Human.tick() already logged it.
 
-                # Remove from active simulation
+                # Remove from active simulation and return to pool.
                 self.entities.remove(entity)
-                # Return the object to its pool for recycling
                 entity.release()
 
     # --- All other methods are unchanged ---
