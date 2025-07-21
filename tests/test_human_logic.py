@@ -41,6 +41,12 @@ class MockWorld:
         grid_y = np.clip(int(pos_y / self.tile_size_meters), 0, self.height - 1)
         return self.grid[grid_y][grid_x]
 
+    def get_grid_position(self, world_position):
+        """Mock version of get_grid_position for Human AI logic."""
+        grid_x = int(world_position[0] / self.tile_size_meters)
+        grid_y = int(world_position[1] / self.tile_size_meters)
+        return (grid_x, grid_y)
+
     def find_path(self, start_pos, end_pos):
         return [end_pos] if start_pos != end_pos else []
 
@@ -78,16 +84,21 @@ class TestHumanInternalState:
 
     # ... other internal state tests are fine as they just use the 'human' fixture.
 
-    def test_eating_replenishes_saturation_and_replants_rice(self, human, rice_plant):
+    def test_eating_replenishes_saturation_and_marks_rice_as_eaten(
+        self, human, rice_plant
+    ):
         rice_plant.age = rice_plant.max_age
         human.saturation = 10
         initial_saturation = human.saturation
 
-        human.eat(rice_plant)  # Just pass the plant itself
+        assert rice_plant.is_eaten is False, "Rice should not be eaten initially"
 
-        # The expected gain now comes from the rice_plant fixture's config
+        human.eat(rice_plant)
+
         assert human.saturation == initial_saturation + rice_plant.saturation_yield
-        assert rice_plant.age == 0
+        assert (
+            rice_plant.is_eaten is True
+        ), "Rice should be marked as eaten after being consumed"
 
 
 class TestHumanAI:
@@ -113,23 +124,19 @@ class TestHumanAI:
     def test_human_eats_when_next_to_food(
         self, human, mock_world_with_entities, rice_config
     ):
-        # ... similar change to instantiate Rice with config
         human.saturation = 20
         human.position = np.array([55.0, 55.0])
-        food = Rice(
-            pos_x=56,
-            pos_y=56,
-            max_age=rice_config["max_age"],
-            saturation_yield=rice_config["saturation_yield"],
-        )
+        food = Rice(**rice_config, pos_x=56, pos_y=56)
         food.age = food.max_age
         mock_world_with_entities.entities.append(food)
 
+        assert food.is_eaten is False
         initial_saturation = human.saturation
+
         human.tick(mock_world_with_entities)
 
         assert human.saturation > initial_saturation
-        assert food.age == 0
+        assert food.is_eaten is True
         assert not human.path
 
 

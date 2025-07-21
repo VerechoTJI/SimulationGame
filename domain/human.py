@@ -1,4 +1,5 @@
 # domain/human.py
+
 import numpy as np
 from .entity import Entity, Colors
 from .rice import Rice
@@ -13,7 +14,6 @@ class Human(Entity):
         move_speed: float,
         max_saturation: int,
         hungry_threshold: int,
-        # --- NEW: Reproduction parameters from config ---
         reproduction_threshold: int,
         reproduction_cost: int,
         reproduction_cooldown: int,
@@ -28,74 +28,80 @@ class Human(Entity):
         self.saturation = self.max_saturation
         self.is_hungry_threshold = hungry_threshold
 
-        # --- NEW: Reproduction attributes ---
+        # Reproduction attributes
         self.reproduction_threshold = reproduction_threshold
         self.reproduction_cost = reproduction_cost
-        self.reproduction_cooldown_period = (
-            reproduction_cooldown  # The value from config
-        )
+        self.reproduction_cooldown_period = reproduction_cooldown
         self.newborn_saturation_endowment = newborn_saturation_endowment
-        self.reproduction_cooldown = 0  # The human's current timer, starts at 0
+        self.reproduction_cooldown = 0
 
-    # --- MODIFIED: is_alive() now checks saturation ---
+    def reset(
+        self,
+        pos_x,
+        pos_y,
+        max_age: int,
+        move_speed: float,
+        max_saturation: int,
+        hungry_threshold: int,
+        reproduction_threshold: int,
+        reproduction_cost: int,
+        reproduction_cooldown: int,
+        newborn_saturation_endowment: int,
+    ):
+        """Resets the Human's state for object pooling."""
+        super().reset("Human", "H", pos_x, pos_y, max_age=max_age)
+        self.move_speed = move_speed
+        self.path = []
+
+        self.max_saturation = max_saturation
+        self.saturation = self.max_saturation  # Newborns start at full saturation
+        self.is_hungry_threshold = hungry_threshold
+
+        self.reproduction_threshold = reproduction_threshold
+        self.reproduction_cost = reproduction_cost
+        self.reproduction_cooldown_period = reproduction_cooldown
+        self.newborn_saturation_endowment = newborn_saturation_endowment
+        self.reproduction_cooldown = 0
+
     def is_alive(self):
         """A human is alive if not too old AND not starved."""
         return self.age <= self.max_age and self.saturation > 0
 
-    # --- NEW: Method to check hunger status ---
     def is_hungry(self):
         return self.saturation < self.is_hungry_threshold
 
-    # --- NEW: Eating action ---
     def eat(self, eatable_entity):
-        # Assumes the entity has a 'saturation_yield' and a 'replant' or similar method.
-        # This is a form of "duck typing".
-        if hasattr(eatable_entity, "saturation_yield") and callable(
-            getattr(eatable_entity, "replant", None)
-        ):
-            self.saturation = min(
-                self.max_saturation, self.saturation + eatable_entity.saturation_yield
-            )
-            eatable_entity.replant()
+        """Consumes an entity, gaining saturation and marking it as eaten."""
+        self.saturation = min(
+            self.max_saturation, self.saturation + eatable_entity.saturation_yield
+        )
+        # Instead of 'replanting', we mark it to be removed and pooled by the world
+        if hasattr(eatable_entity, "get_eaten"):
+            eatable_entity.get_eaten()
 
-    # --- NEW: Blastogenesis (asexual reproduction) methods ---
+    # --- REPRODUCTION METHODS (UNCHANGED) ---
     def can_reproduce(self) -> bool:
-        """Checks if the human meets the conditions for reproduction."""
         return (
             self.saturation >= self.reproduction_threshold
             and self.reproduction_cooldown <= 0
         )
 
     def reproduce(self) -> int:
-        """
-        Executes reproduction. Deducts saturation cost, sets the cooldown,
-        and returns the saturation endowment for the newborn.
-        """
         self.saturation -= self.reproduction_cost
         self.reproduction_cooldown = self.reproduction_cooldown_period
         return self.newborn_saturation_endowment
 
+    # --- AI and Movement logic methods are unchanged ---
     def _find_food_and_path(self, world):
-        """Finds the nearest mature rice and sets a path to it."""
         nearest_food = world.find_nearest_entity(
             self.position, Rice, lambda r: r.matured
         )
-
         if nearest_food:
-            start_grid_pos = (
-                int(self.position[0] / world.tile_size_meters),
-                int(self.position[1] / world.tile_size_meters),
-            )
-            end_grid_pos = (
-                int(nearest_food.position[0] / world.tile_size_meters),
-                int(nearest_food.position[1] / world.tile_size_meters),
-            )
-
-            # Ensure we don't try to pathfind from an invalid start
+            start_grid_pos = world.get_grid_position(self.position)
+            end_grid_pos = world.get_grid_position(nearest_food.position)
             start_tile = world.get_tile_at_pos(self.position[0], self.position[1])
             if start_tile.tile_move_speed_factor == 0:
                 return False
-
             path = world.find_path(start_grid_pos, end_grid_pos)
             if path:
                 self.path = path
@@ -108,11 +114,8 @@ class Human(Entity):
     def tick(self, world):
         super().tick(world)
         self.saturation -= 1
-
-        # Decrease reproduction cooldown timer each tick
         if self.reproduction_cooldown > 0:
             self.reproduction_cooldown -= 1
-
         if not self.is_alive():
             return
 
@@ -124,27 +127,18 @@ class Human(Entity):
                         world.add_log(
                             f"{Colors.GREEN}{self.name} ate {entity.name}.{Colors.RESET}"
                         )
-                        # --- CLEANER: Just tell the human to eat the entity ---
                         self.eat(entity)
                         self.path = []
                         return
 
-        # Priority 2: PLAN a path if one is needed.
-        # This block is now only reached if the human did NOT eat this tick.
         if not self.path:
-            # If hungry, the only goal is to find food.
             if self.is_hungry():
                 if not self._find_food_and_path(world):
-                    # If no food found, wander aimlessly as a last resort.
                     self._find_new_path(world)
-            # If not hungry, just wander.
             else:
                 self._find_new_path(world)
 
-        # Priority 3: MOVE if a path exists.
-        # This block is only reached if no eating occurred.
         if self.path:
-            # This entire movement block is unchanged.
             target_grid_pos = self.path[0]
             target_pos = np.array(
                 [
@@ -168,15 +162,12 @@ class Human(Entity):
                     normalized_direction = direction_vector / distance_to_target
                     move_vector = normalized_direction * effective_speed
                     self.position += move_vector
-
             max_x = world.width * world.tile_size_meters
             max_y = world.height * world.tile_size_meters
             self.position[0] = np.clip(self.position[0], 0, max_x - 0.01)
             self.position[1] = np.clip(self.position[1], 0, max_y - 0.01)
 
-    # _find_new_path method is unchanged
     def _find_new_path(self, world):
-        # ... (identical to previous version)
         self.path = []
         start_grid_x = np.clip(
             int(self.position[0] / world.tile_size_meters), 0, world.width - 1

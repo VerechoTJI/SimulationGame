@@ -136,3 +136,131 @@ class TestWorldReproduction:
         assert (dx <= 1 and dy <= 1) and (
             dx + dy > 0
         ), "Newborn should be in an adjacent tile."
+
+
+class TestWorldObjectPooling:
+    def test_dying_human_is_returned_to_pool(self, world_instance):
+        """Verify that when a Human dies, it's released to the pool, not destroyed."""
+        # ARRANGE
+        world_instance.spawn_entity("human", 5, 5)
+        human = world_instance.entities[0]
+        human_id = human.id
+        human.saturation = 1  # One tick away from starvation
+
+        # Pre-condition assertions
+        assert len(world_instance.entities) == 1
+        assert len(world_instance._human_pool._pool) == 0
+
+        # ACT
+        world_instance.game_tick()  # This should cause the human to die and be pooled.
+
+        # ASSERT
+        assert (
+            len(world_instance.entities) == 0
+        ), "The human should be removed from the active entity list."
+        assert (
+            len(world_instance._human_pool._pool) == 1
+        ), "The human pool should now contain one object."
+
+        pooled_human = world_instance._human_pool._pool[0]
+        assert (
+            pooled_human.id == human_id
+        ), "The object in the pool should be the same one that died."
+
+    def test_spawning_human_reuses_pooled_object(self, world_instance):
+        """Verify that spawning a new Human reuses an object from the pool if available."""
+        # ARRANGE: Kill a human to populate the pool
+        world_instance.spawn_entity("human", 5, 5)
+        dead_human_id = world_instance.entities[0].id
+        world_instance.entities[0].saturation = 0
+        world_instance.game_tick()  # Kills the human, moving it to the pool
+
+        # Pre-condition assertions
+        assert len(world_instance.entities) == 0
+        assert len(world_instance._human_pool._pool) == 1
+
+        # ACT
+        world_instance.spawn_entity(
+            "human", 1, 1
+        )  # This should reuse the pooled object
+
+        # ASSERT
+        assert len(world_instance.entities) == 1, "There should be one active human."
+        assert (
+            len(world_instance._human_pool._pool) == 0
+        ), "The pool should now be empty."
+
+        recycled_human = world_instance.entities[0]
+        assert (
+            recycled_human.id == dead_human_id
+        ), "The new human should be the same instance as the old one."
+
+    def test_recycled_human_has_state_reset(self, world_instance):
+        """Verify that a recycled object has its state properly reset."""
+        # ARRANGE: Create and kill a human with specific non-default values
+        world_instance.spawn_entity("human", 5, 5)
+        human_to_die = world_instance.entities[0]
+        human_to_die.age = 50
+        human_to_die.saturation = 0
+        human_to_die_id = human_to_die.id
+        world_instance.game_tick()
+
+        # ACT: Spawn a new human at a different location
+        world_instance.spawn_entity("human", 1, 1)
+        recycled_human = world_instance.entities[0]
+
+        # ASSERT
+        assert (
+            recycled_human.id == human_to_die_id
+        ), "Should be the same object instance"
+
+        # Check that state was reset to initial values, not the values at death
+        assert recycled_human.age == 0, "Age should be reset to 0"
+        assert (
+            recycled_human.saturation == recycled_human.max_saturation
+        ), "Saturation should be reset to max"
+
+        new_pos = world_instance.get_grid_position(recycled_human.position)
+        assert new_pos == (1, 1), "Position should be reset to the new spawn location"
+
+    def test_eaten_rice_is_returned_to_pool(self, world_instance):
+        """Verify that eaten rice is also pooled correctly."""
+        # ARRANGE
+        # Use world.spawn_entity to ensure objects are created via the pool.
+        world_instance.spawn_entity("human", 0, 0)
+        world_instance.spawn_entity("rice", 1, 1)
+
+        # Retrieve the newly created entities from the world
+        human = next(e for e in world_instance.entities if isinstance(e, Human))
+        rice_plant = next(e for e in world_instance.entities if isinstance(e, Rice))
+
+        # Now, modify the state of these "live" objects for the test scenario
+        human.position = np.array(
+            [5.0, 5.0]
+        )  # Position doesn't matter, will eat on first tick
+        human.saturation = 10  # Ensure hungry
+        rice_plant.position = np.array([6.0, 6.0])  # Close enough to be eaten
+        rice_plant.age = rice_plant.max_age  # Make it mature
+        rice_plant_id = rice_plant.id
+
+        # Pre-conditions
+        assert len(world_instance.entities) == 2
+        # Pool should be empty because these were the first two objects created.
+        assert len(world_instance._rice_pool._pool) == 0
+
+        # ACT
+        # Human's tick will mark the rice as eaten.
+        # World's tick will process the removal and pooling.
+        world_instance.game_tick()
+
+        # ASSERT
+        active_rice_plants = [e for e in world_instance.entities if isinstance(e, Rice)]
+        assert (
+            len(active_rice_plants) == 0
+        ), "Eaten rice should be removed from active entities."
+        assert (
+            len(world_instance._rice_pool._pool) == 1
+        ), "Rice pool should now have one object."
+        assert (
+            world_instance._rice_pool._pool[0].id == rice_plant_id
+        ), "The pooled rice should be the correct instance."
