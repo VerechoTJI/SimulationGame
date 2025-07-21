@@ -13,10 +13,15 @@ class MockWorld:
 
 class TestRice:
     # --- MODIFIED: The test now uses the globally available 'rice_plant' fixture ---
-    def test_rice_replant(self, rice_plant):  # No longer needs mock_world
-        rice_plant.age = rice_plant.max_age - 1
-        rice_plant.replant()
-        assert rice_plant.age == 0
+    def test_rice_get_eaten_sets_flag(self, rice_plant):
+        assert rice_plant.is_eaten is False
+        rice_plant.get_eaten()
+        assert rice_plant.is_eaten is True
+
+    def test_rice_is_not_alive_after_being_eaten(self, rice_plant):
+        assert rice_plant.is_alive() is True
+        rice_plant.get_eaten()
+        assert rice_plant.is_alive() is False
 
     def test_rice_matures_at_half_max_age(self, rice_plant):
         # The tick method needs a world-like object, even a simple one.
