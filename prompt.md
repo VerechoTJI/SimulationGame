@@ -75,7 +75,7 @@ We have just completed a major, successful refactoring of the domain layer to im
 - **Phase 2: The Execution:** Once the plan is approved, we will execute it one step at a time, starting with tests.
 
 **Context-Limited Mode & Our Core Rule:**
-To ensure accuracy, I operate in a context-limited mode and do not have persistent memory of file contents. Therefore, we will adhere to the following strict process:
+To ensure accuracy, you will operate in a context-limited mode and do not have persistent memory of file contents. Therefore, we will adhere to the following strict process:
 
 1.  Before writing any test or implementation code, you MUST first identify the primary file to be modified AND its critical dependencies. You will then request the full code for all of these files at once to understand their contracts.
     - _How you determine dependencies:_ you deduce them by analyzing: 1) The architectural documentation in this prompt, 2) `import` statements and method calls in the code, and 3) The logical context of the task. You can also request extra code for more context.
