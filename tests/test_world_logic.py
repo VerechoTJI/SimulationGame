@@ -1,26 +1,19 @@
 # tests/test_world_logic.py
 import pytest
 import numpy as np
-import copy
+
+# The 'copy' import is no longer needed here
+# import copy
 
 from domain.human import Human
 
 
+# The 'world_no_spawn' fixture has been moved to conftest.py
+# The 'world_instance' fixture is only used here, so it can stay.
 @pytest.fixture
 def world_instance(world_factory):
     """Provides a real, but blank, World instance."""
     return world_factory(width=10, height=10)
-
-
-@pytest.fixture
-def world_no_spawn(world_factory, mock_config):
-    """A fixture for a world with natural spawning disabled for deterministic tests."""
-    test_config = copy.deepcopy(mock_config)
-    # Disable natural rice spawning
-    test_config["entities"]["rice"]["spawning"]["natural_spawn_chance"] = 0.0
-    # Use a fixed map seed for predictable terrain
-    test_config["simulation"]["map_seed"] = 12345
-    return world_factory(custom_config=test_config)
 
 
 class TestWorldReproduction:
