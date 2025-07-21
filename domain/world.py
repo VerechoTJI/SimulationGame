@@ -9,6 +9,8 @@ from .entity import Entity, Colors
 from .human import Human
 from .rice import Rice
 from .object_pool import ObjectPool
+from .tile import Tile, TILES
+from .pathfinder import Pathfinder
 
 
 class World:
@@ -39,6 +41,7 @@ class World:
                 0, 0, **self.get_config_value("entities", "rice", "attributes")
             )
         )
+        self.pathfinder = Pathfinder(self.grid)
 
     def _create_human(self, pos_x, pos_y, initial_saturation=None):
         """Internal factory for creating a Human instance using the object pool."""
@@ -250,57 +253,8 @@ class World:
         return closest_entity
 
     def find_path(self, start_pos, end_pos):
-        def get_move_cost(grid_pos):
-            tile = self.grid[grid_pos[1]][grid_pos[0]]
-            if tile.tile_move_speed_factor == 0:
-                return float("inf")
-            return 1.0 / tile.tile_move_speed_factor
-
-        start_node, end_node = tuple(start_pos), tuple(end_pos)
-        open_set = []
-        heapq.heappush(open_set, (0, start_node))
-        came_from = {}
-        g_score = {start_node: 0}
-        f_score = {
-            start_node: np.linalg.norm(np.array(start_node) - np.array(end_node))
-        }
-        while open_set:
-            current = heapq.heappop(open_set)[1]
-            if current == end_node:
-                path = []
-                while current in came_from:
-                    path.append(current)
-                    current = came_from[current]
-                return path[::-1]
-            for dx, dy in [
-                (0, 1),
-                (0, -1),
-                (1, 0),
-                (-1, 0),
-                (-1, -1),
-                (-1, 1),
-                (1, -1),
-                (1, 1),
-            ]:
-                neighbor = (current[0] + dx, current[1] + dy)
-                if not (
-                    0 <= neighbor[0] < self.width and 0 <= neighbor[1] < self.height
-                ):
-                    continue
-                move_cost = get_move_cost(neighbor)
-                if move_cost == float("inf"):
-                    continue
-                tentative_g_score = g_score[current] + (
-                    move_cost * (1.414 if dx != 0 and dy != 0 else 1.0)
-                )
-                if tentative_g_score < g_score.get(neighbor, float("inf")):
-                    came_from[neighbor] = current
-                    g_score[neighbor] = tentative_g_score
-                    heuristic = np.linalg.norm(np.array(neighbor) - np.array(end_node))
-                    f_score[neighbor] = tentative_g_score + heuristic
-                    if neighbor not in [i[1] for i in open_set]:
-                        heapq.heappush(open_set, (f_score[neighbor], neighbor))
-        return None
+        """Delegates pathfinding to the Pathfinder service."""
+        return self.pathfinder.find_path(start_pos, end_pos)
 
     def get_grid_position(self, world_position):
         grid_x = int(world_position[0] / self.tile_size_meters)
