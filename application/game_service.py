@@ -108,7 +108,8 @@ class GameService:
         ]
 
         human_statuses = []
-        for entity in self.world.entities:
+        # --- FIX #1: Access entities through the entity_manager ---
+        for entity in self.world.entity_manager.entities:
             grid_x = int(entity.position[0] / self.world.tile_size_meters)
             grid_y = int(entity.position[1] / self.world.tile_size_meters)
 
@@ -129,11 +130,11 @@ class GameService:
             "display_grid": display_grid,
             "width": self.world.width,
             "tick": self.world.tick_count,
-            "entity_count": len(self.world.entities),
+            # --- FIX #2: Get entity count from the entity_manager ---
+            "entity_count": len(self.world.entity_manager.entities),
             "logs": self.world.log_messages,
             "colors": Colors,
             "human_statuses": human_statuses,
-            # --- NEW: Pass simulation control state to the presenter ---
             "is_paused": self._is_paused,
             "tick_seconds": self._tick_seconds,
             "base_tick_seconds": self._base_tick_seconds,

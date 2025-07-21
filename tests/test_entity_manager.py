@@ -1,10 +1,11 @@
 # tests/test_entity_manager.py
 
 import pytest
+import numpy as np
 from domain.entity_manager import EntityManager
+from domain.entity import Entity
 from domain.human import Human
 from domain.rice import Rice
-from domain.entity import Entity
 
 
 @pytest.fixture
@@ -27,7 +28,6 @@ def test_create_human(entity_manager):
     assert isinstance(human, Human)
     assert len(entity_manager.entities) == 1
     assert entity_manager.entities[0] is human
-    # Verify position was converted from grid to world coords
     assert human.position[0] == 55.0
     assert human.position[1] == 55.0
 
@@ -42,40 +42,10 @@ def test_create_rice(entity_manager):
     assert rice.position[1] == 15.0
 
 
-def test_object_pooling_reuse(entity_manager):
-    """Tests that dead entities are returned to the pool and reused."""
-    # Create a human, get its ID
-    human1 = entity_manager.create_human(x=1, y=1)
-    human1_id = human1.id
-
-    # "Kill" the human so it will be cleaned up
-    human1.saturation = 0
-    assert not human1.is_alive()
-
-    # Run cleanup, which should release the object back to the pool
-    entity_manager.cleanup_dead_entities()
-    assert len(entity_manager.entities) == 0
-    # The internal pool should now have one object
-    assert len(entity_manager._human_pool._pool) == 1
-
-    # Create a new human
-    human2 = entity_manager.create_human(x=2, y=2)
-    # The internal pool should now be empty again
-    assert len(entity_manager._human_pool._pool) == 0
-
-    # Assert it's the same object by checking the ID
-    assert human2.id == human1_id
-    # Assert its state was correctly reset
-    assert human2.position[0] == 25.0
-    assert human2.saturation > 0
-
-
 def test_cleanup_returns_removed_entities(entity_manager):
     """Tests that the cleanup method returns the list of entities it removed."""
     human = entity_manager.create_human(x=1, y=1)
     rice = entity_manager.create_rice(x=2, y=2)
-
-    # "Kill" only the human
     human.age = 999
 
     removed = entity_manager.cleanup_dead_entities()
@@ -86,27 +56,109 @@ def test_cleanup_returns_removed_entities(entity_manager):
     assert entity_manager.entities[0] is rice
 
 
-def test_find_nearest_entity(entity_manager):
-    """Tests the logic for finding the nearest entity."""
-    rice1 = entity_manager.create_rice(x=1, y=1)  # at (15, 15)
-    rice2 = entity_manager.create_rice(x=9, y=9)  # at (95, 95)
-    human = entity_manager.create_human(x=2, y=2)  # at (25, 25)
+# --- MOVED AND REFACTORED TESTS ---
 
-    origin_pos = human.position
 
-    # Find nearest of any type
-    nearest = entity_manager.find_nearest_entity(origin_pos, entity_type=Entity)
-    assert isinstance(nearest, Human)
+class TestEntityManagerFindNearest:
+    def test_find_nearest_entity(self, entity_manager, human, rice_plant):
+        # ARRANGE
+        # Use the manager to create entities in the correct state
+        rice_close = entity_manager.create_rice(x=1, y=1)  # pos (15, 15)
+        rice_far = entity_manager.create_rice(x=8, y=8)  # pos (85, 85)
 
-    # Find nearest Rice
-    nearest_rice = entity_manager.find_nearest_entity(origin_pos, entity_type=Rice)
-    assert nearest_rice is rice1
+        origin_pos = np.array([5.0, 5.0])
 
-    # Test with predicate (e.g., find only matured rice)
-    rice1.age = 0  # Not mature
-    rice2.age = rice2.max_age  # Mature
+        # ACT
+        found = entity_manager.find_nearest_entity(origin_pos, Rice)
 
-    nearest_matured_rice = entity_manager.find_nearest_entity(
-        origin_pos, entity_type=Rice, predicate=lambda r: r.matured
-    )
-    assert nearest_matured_rice is rice2
+        # ASSERT
+        assert found is not None
+        assert found.id == rice_close.id
+
+    def test_find_nearest_with_predicate(self, entity_manager):
+        # ARRANGE
+        rice_close_unmatured = entity_manager.create_rice(x=1, y=1)
+        rice_close_unmatured.age = 1  # Not mature
+
+        rice_far_matured = entity_manager.create_rice(x=8, y=8)
+        rice_far_matured.age = rice_far_matured.max_age  # Mature
+
+        origin_pos = np.array([5.0, 5.0])
+
+        # ACT
+        found = entity_manager.find_nearest_entity(
+            origin_pos, Rice, predicate=lambda r: r.matured
+        )
+
+        # ASSERT
+        assert found is not None
+        assert found.id == rice_far_matured.id
+
+    def test_returns_none_if_no_matching_entity_found(self, entity_manager, human):
+        # ARRANGE
+        entity_manager.create_human(x=1, y=1)  # The only entity is a human
+        origin_pos = np.array([5.0, 5.0])
+
+        # ACT
+        found = entity_manager.find_nearest_entity(origin_pos, Rice)
+
+        # ASSERT
+        assert found is None
+
+
+class TestEntityManagerObjectPooling:
+    def test_dying_entity_is_returned_to_pool(self, entity_manager):
+        # ARRANGE
+        human = entity_manager.create_human(x=5, y=5)
+        human_id = human.id
+        human.saturation = 0  # "Kill" the human
+
+        assert len(entity_manager.entities) == 1
+        assert len(entity_manager._human_pool._pool) == 0
+
+        # ACT
+        entity_manager.cleanup_dead_entities()
+
+        # ASSERT
+        assert len(entity_manager.entities) == 0
+        assert len(entity_manager._human_pool._pool) == 1
+        pooled_human = entity_manager._human_pool._pool[0]
+        assert pooled_human.id == human_id
+
+    def test_creating_entity_reuses_pooled_object(self, entity_manager):
+        # ARRANGE
+        # Create, kill, and clean up a human to populate the pool
+        human1 = entity_manager.create_human(x=5, y=5)
+        dead_human_id = human1.id
+        human1.saturation = 0
+        entity_manager.cleanup_dead_entities()
+
+        assert len(entity_manager.entities) == 0
+        assert len(entity_manager._human_pool._pool) == 1
+
+        # ACT
+        # Create a new human, which should come from the pool
+        human2 = entity_manager.create_human(x=1, y=1)
+
+        # ASSERT
+        assert len(entity_manager.entities) == 1
+        assert len(entity_manager._human_pool._pool) == 0
+        assert human2.id == dead_human_id
+
+    def test_recycled_entity_has_state_reset(self, entity_manager):
+        # ARRANGE
+        human_to_die = entity_manager.create_human(x=5, y=5)
+        human_to_die.age = 50
+        human_to_die.saturation = 0  # Kill it
+        human_to_die_id = human_to_die.id
+        entity_manager.cleanup_dead_entities()
+
+        # ACT
+        recycled_human = entity_manager.create_human(x=1, y=1)
+
+        # ASSERT
+        assert recycled_human.id == human_to_die_id
+        assert recycled_human.age == 0, "Age should be reset"
+        assert recycled_human.saturation == recycled_human.max_saturation
+        # Check position was reset (1.5 * 10 = 15)
+        assert recycled_human.position[0] == 15.0

@@ -8,6 +8,7 @@ from .entity import Entity, Colors
 from .tile import TILES
 from .pathfinder import Pathfinder
 from .entity_manager import EntityManager
+from .spawning_manager import SpawningManager
 
 
 class World:
@@ -19,59 +20,66 @@ class World:
         self.grid = self._generate_map()
         self.tick_count = 0
         self.log_messages = []
-        self.replant_queue = []  # <-- ADD THIS LINE
-        self.rice_spawn_chance_per_tick = self.get_config_value(
-            "entities", "rice", "spawning", "natural_spawn_chance"
-        )
-
         self.pathfinder = Pathfinder(self.grid)
         self.entity_manager = EntityManager(config_data, self.tile_size_meters)
+        self.spawning_manager = SpawningManager(self.grid, self.config)
 
     def spawn_entity(self, entity_type, x, y):
-        """Delegates entity creation to the EntityManager."""
-        new_entity = None
+        """A simplified spawner that only delegates to the EntityManager."""
         if entity_type.lower() == "human":
-            new_entity = self.entity_manager.create_human(x, y)
+            self.entity_manager.create_human(x, y)
         elif entity_type.lower() == "rice":
-            new_entity = self.entity_manager.create_rice(x, y)
-
-        if new_entity:
-            self.add_log(
-                f"{Colors.CYAN}Spawned {new_entity.name} at grid ({x}, {y}).{Colors.RESET}"
-            )
-        else:
-            self.add_log(
-                f"{Colors.RED}Unknown entity type: {entity_type}{Colors.RESET}"
-            )
+            self.entity_manager.create_rice(x, y)
 
     def game_tick(self):
-        # Snapshot entities from the manager at the start of the tick.
+        self.tick_count += 1
         entities_to_process = list(self.entity_manager.entities)
 
-        # --- Spawning Phase (handled by World) ---
-        if self.replant_queue:
-            for x, y in self.replant_queue:
-                self.spawn_entity("rice", x, y)
-                self.log_messages[-1] = (
-                    f"{Colors.GREEN}A new Rice plant was replanted at ({x}, {y}).{Colors.RESET}"
-                )
-            self.replant_queue.clear()
-        self.natural_spawning_tick()
+        # --- Spawning Phase ---
+        # Get all currently occupied tiles once.
+        occupied_tiles = {
+            self.get_grid_position(e.position) for e in self.entity_manager.entities
+        }
 
-        # --- Action Phase (delegated to entities) ---
-        self.tick_count += 1
+        # 1. Process replanting from the previous tick.
+        for x, y in self.spawning_manager.process_replant_queue():
+            new_rice = self.entity_manager.create_rice(x, y)
+            self.add_log(
+                f"{Colors.GREEN}A Rice plant was replanted at ({x}, {y}).{Colors.RESET}"
+            )
+
+        # 2. Process natural spawning for this tick.
+        natural_spawn_coord = self.spawning_manager.get_natural_rice_spawn_location(
+            occupied_tiles
+        )
+        if natural_spawn_coord:
+            x, y = natural_spawn_coord
+            new_rice = self.entity_manager.create_rice(x, y)
+            self.add_log(
+                f"{Colors.GREEN}A new Rice plant sprouted at ({x}, {y}).{Colors.RESET}"
+            )
+
+        # --- Action Phase ---
         for entity in entities_to_process:
             if entity.is_alive():
-                # NOTE: entity.tick() still needs access to the world for context
                 entity.tick(self)
 
-                # Handle Reproduction
+                # Handle Reproduction (Human-specific logic)
                 if hasattr(entity, "can_reproduce") and entity.can_reproduce():
                     parent_grid_pos = self.get_grid_position(entity.position)
-                    spawn_grid_pos = self._find_adjacent_walkable_tile(parent_grid_pos)
-                    if spawn_grid_pos:
+
+                    # Update occupied tiles for this check, in case new rice spawned
+                    current_occupied = {
+                        self.get_grid_position(e.position)
+                        for e in self.entity_manager.entities
+                    }
+
+                    spawn_pos = self.spawning_manager.get_reproduction_spawn_location(
+                        parent_grid_pos, current_occupied
+                    )
+                    if spawn_pos:
                         newborn_saturation = entity.reproduce()
-                        spawn_x, spawn_y = spawn_grid_pos
+                        spawn_x, spawn_y = spawn_pos
                         newborn = self.entity_manager.create_human(
                             spawn_x, spawn_y, initial_saturation=newborn_saturation
                         )
@@ -79,78 +87,22 @@ class World:
                             f"{Colors.MAGENTA}{entity.name} has given birth to {newborn.name}!{Colors.RESET}"
                         )
 
-        # --- Cleanup Phase (delegated to EntityManager) ---
+        # --- Cleanup Phase ---
         removed_entities = self.entity_manager.cleanup_dead_entities()
-        if removed_entities:
-            for entity in removed_entities:
-                # Spawning logic remains in World: check if a removed rice needs replanting
-                if hasattr(entity, "is_eaten") and entity.is_eaten:
-                    grid_pos = self.get_grid_position(entity.position)
-                    if grid_pos not in self.replant_queue:
-                        self.replant_queue.append(grid_pos)
+        for entity in removed_entities:
+            # If an eaten rice is removed, queue it for replanting on the NEXT tick.
+            if hasattr(entity, "is_eaten") and entity.is_eaten:
+                grid_pos = self.get_grid_position(entity.position)
+                self.spawning_manager.add_to_replant_queue(grid_pos)
 
-                # Logging remains in World
-                if hasattr(entity, "saturation"):  # It's a Human
-                    death_reason = "of old age"
-                    if entity.saturation <= 0:
-                        death_reason = "from starvation"
-                    self.add_log(
-                        f"{Colors.RED}{entity.name} has died {death_reason}.{Colors.RESET}"
-                    )
-
-    # --- All other methods are unchanged ---
-    def _find_adjacent_walkable_tile(self, grid_pos):
-        occupied_tiles = {
-            self.get_grid_position(e.position) for e in self.entity_manager.entities
-        }
-        x, y = grid_pos
-        possible_spawns = []
-        for dy in [-1, 0, 1]:
-            for dx in [-1, 0, 1]:
-                if dx == 0 and dy == 0:
-                    continue
-                nx, ny = x + dx, y + dy
-                if not (0 <= nx < self.width and 0 <= ny < self.height):
-                    continue
-                if (nx, ny) in occupied_tiles:
-                    continue
-                tile = self.grid[ny][nx]
-                if tile.tile_move_speed_factor > 0:
-                    possible_spawns.append((nx, ny))
-        if possible_spawns:
-            return random.choice(possible_spawns)
-        return None
-
-    def natural_spawning_tick(self):
-        if random.random() > self.rice_spawn_chance_per_tick:
-            return
-        valid_spawn_tiles = []
-        occupied_tiles = {
-            self.get_grid_position(e.position) for e in self.entity_manager.entities
-        }
-        for y in range(self.height):
-            for x in range(self.width):
-                if self.grid[y][x].name == "Land" and (x, y) not in occupied_tiles:
-                    is_adjacent_to_water = False
-                    for dy in [-1, 0, 1]:
-                        for dx in [-1, 0, 1]:
-                            if dx == 0 and dy == 0:
-                                continue
-                            nx, ny = x + dx, y + dy
-                            if 0 <= nx < self.width and 0 <= ny < self.height:
-                                if self.grid[ny][nx].name == "Water":
-                                    is_adjacent_to_water = True
-                                    break
-                        if is_adjacent_to_water:
-                            break
-                    if is_adjacent_to_water:
-                        valid_spawn_tiles.append((x, y))
-        if valid_spawn_tiles:
-            spawn_x, spawn_y = random.choice(valid_spawn_tiles)
-            self.spawn_entity("rice", spawn_x, spawn_y)
-            self.log_messages[-1] = (
-                f"{Colors.GREEN}A new Rice plant sprouted at ({spawn_x}, {spawn_y}).{Colors.RESET}"
-            )
+            # Log deaths
+            if hasattr(entity, "saturation"):  # It's a Human
+                death_reason = (
+                    "of old age" if entity.age > entity.max_age else "from starvation"
+                )
+                self.add_log(
+                    f"{Colors.RED}{entity.name} has died {death_reason}.{Colors.RESET}"
+                )
 
     def add_log(self, message):
         self.log_messages.append(message)
@@ -158,7 +110,11 @@ class World:
             self.log_messages.pop(0)
 
     def _generate_map(self):
-        noise = PerlinNoise(octaves=4, seed=random.randint(1, 10000))
+        # Use a fixed seed from config if available, otherwise a random one.
+        seed = self._get_config(
+            "simulation", "map_seed", default=random.randint(1, 10000)
+        )
+        noise = PerlinNoise(octaves=4, seed=seed)
         world_map = [[None for _ in range(self.width)] for _ in range(self.height)]
         for y in range(self.height):
             for x in range(self.width):
@@ -188,3 +144,12 @@ class World:
         grid_x = np.clip(grid_x, 0, self.width - 1)
         grid_y = np.clip(grid_y, 0, self.height - 1)
         return (grid_x, grid_y)
+
+    def _get_config(self, *keys, default=None):
+        value = self.config
+        try:
+            for key in keys:
+                value = value[key]
+            return value
+        except (KeyError, TypeError):
+            return default

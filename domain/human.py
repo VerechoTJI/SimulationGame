@@ -93,7 +93,7 @@ class Human(Entity):
 
     # --- AI and Movement logic methods are unchanged ---
     def _find_food_and_path(self, world):
-        nearest_food = world.find_nearest_entity(
+        nearest_food = world.entity_manager.find_nearest_entity(
             self.position, Rice, lambda r: r.matured
         )
         if nearest_food:
@@ -121,7 +121,7 @@ class Human(Entity):
 
         if self.is_hungry():
             eat_distance = world.tile_size_meters * 1.5
-            for entity in world.entities:
+            for entity in world.entity_manager.entities:
                 if isinstance(entity, Rice) and entity.matured:
                     if np.linalg.norm(self.position - entity.position) < eat_distance:
                         world.add_log(
