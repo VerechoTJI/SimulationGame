@@ -1,3 +1,4 @@
+# cli_main.py
 import time
 import os
 import threading
@@ -183,14 +184,20 @@ def display(render_data, current_input_list, cursor_pos):
     map_height = len(map_grid)
     terminal_width, terminal_height = os.get_terminal_size()
 
-    # --- NEW: Dynamic title based on simulation state ---
+    # --- MODIFIED: Dynamic title now includes performance stats ---
     status = "PAUSED" if render_data.get("is_paused", False) else "RUNNING"
     base_tick = render_data.get("base_tick_seconds", 0.3)
     current_tick = render_data.get("tick_seconds", 0.3)
-    speed_multiplier = base_tick / current_tick
+    speed_multiplier = base_tick / current_tick if current_tick > 0 else float("inf")
+
+    # New performance stats
+    render_fps = render_data.get("render_fps", 0.0)
+    logic_tps = render_data.get("logic_tps", 0.0)
+    perf_stats = f"Render: {render_fps:.1f}fps | Logic: {logic_tps:.1f}tps"
+
     title_status = f"Status: {status} | Speed: {speed_multiplier:.2f}x"
     title_text = "--- Simulation Game ---"
-    title_line = f"{title_text} | {title_status}"
+    title_line = f"{title_text} | {perf_stats} | {title_status}"
 
     map_width_chars = 0
     if map_height > 0 and len(map_grid[0]) > 0:
@@ -310,36 +317,72 @@ def display(render_data, current_input_list, cursor_pos):
 
 
 def game_loop(game_service, command_queue, shared_state):
-    last_tick_time = time.time()
+    # --- MODIFIED: FPS/TPS Calculation variables and loop timing ---
+    last_timed_tick_time = time.time()
+    last_fps_update_time = time.time()
+    render_frame_count = 0
+    logic_tick_count = 0
+    render_fps = 0.0
+    logic_tps = 0.0
+
     try:
         while True:
-            # Process any commands from the queue
+            # Get data at the start of the frame, including tick count before updates
+            render_data = game_service.get_render_data()
+            tick_before = render_data["tick"]
+
+            # Process any commands from the input thread
             try:
                 command = command_queue.get_nowait()
                 if command.lower() in ["q", "quit", "exit"]:
                     return
                 game_service.process_command(command)
+                # If a command was processed, the state might have changed (e.g. speed), so refresh data
+                if command:
+                    render_data = game_service.get_render_data()
             except queue.Empty:
                 pass
 
-            # First, get the most up-to-date state from the service
-            render_data = game_service.get_render_data()
+            # Check if it's time for the next automatic tick based on current game speed
             current_tick_seconds = render_data["tick_seconds"]
-
-            # Then, check if it's time for the next automatic tick
             current_time = time.time()
-            if current_time - last_tick_time >= current_tick_seconds:
+            if current_time - last_timed_tick_time >= current_tick_seconds:
                 game_service.tick()  # This call respects the pause state internally
-                last_tick_time = current_time
+                last_timed_tick_time = current_time
 
-            # Get user input state and render the display
+            # After all updates, get the final state for rendering
+            final_render_data = game_service.get_render_data()
+            tick_after = final_render_data["tick"]
+
+            # Update counters for FPS/TPS calculation
+            render_frame_count += 1
+            if tick_after > tick_before:
+                logic_tick_count += tick_after - tick_before
+
+            # Recalculate performance stats every second
+            elapsed_time = current_time - last_fps_update_time
+            if elapsed_time >= 1.0:
+                render_fps = render_frame_count / elapsed_time
+                logic_tps = logic_tick_count / elapsed_time
+                render_frame_count = 0
+                logic_tick_count = 0
+                last_fps_update_time = current_time
+
+            # Inject the calculated performance stats into the render data
+            final_render_data["render_fps"] = render_fps
+            final_render_data["logic_tps"] = logic_tps
+
+            # Get user input state for rendering the prompt
             with shared_state["lock"]:
                 current_input_list = list(shared_state["input_buffer"])
                 cursor_pos = shared_state["cursor_pos"]
 
-            display(render_data, current_input_list, cursor_pos)
+            # Render the entire screen with the final, augmented data
+            display(final_render_data, current_input_list, cursor_pos)
 
-            time.sleep(0.05)  # A short sleep to prevent busy-waiting
+            # Sleep to target a stable render rate and prevent CPU busy-waiting
+            time.sleep(0.016)  # Target ~60fps
+
     except Exception as e:
         nb_input_for_cleanup.restore_terminal()
         print("\n" * 5)
