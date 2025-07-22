@@ -1,4 +1,4 @@
-### **New Start Prompt** v0.3
+### **New Start Prompt** v0.4
 
 Hello! Your task is to continue the development of a Python command-line simulation game. The project follows Domain-Driven Design (DDD), Test-Driven Development (TDD), and Clean Architecture principles.
 
@@ -16,13 +16,13 @@ Hello! Your task is to continue the development of a Python command-line simulat
 - **Architecture:** Multi-threaded (fast render loop, slower logic tick), data-driven via `config.json`.
 - **World:** A grid-based map with Land, Water, and Mountain tiles affecting movement.
 - **Entities:**
-  - `Human`: Navigates using A\*, has `saturation`, eats `Rice`, and reproduces.
+  - `Human`: Navigates using a hybrid system: a centralized **Flow Field** for scalable food-seeking when hungry, and **A\*** for individual wandering when not. Has `saturation`, eats `Rice`, and reproduces.
   - `Rice`: Matures over time and spawns naturally.
   - **Optimization:** All entities are managed by a generic **Object Pooling** system (`domain/object_pool.py`) to reduce runtime overhead.
 
 **Project File Hierarchy & Explanations:**
 
-- `config.json`: Data file for all simulation parameters, including controls like `camera_move_increment`.
+- `config.json`: Data file for all simulation parameters, including the `flow_field_update_interval`.
 - `cli_main.py`: **Minimal entry point.** Only responsible for setting up the Python path and calling the main run function.
 - `presentation/`: **Presentation Layer.** Responsible for all user-facing logic (rendering, input).
   - `__init__.py`: Marks as a package.
@@ -39,30 +39,32 @@ Hello! Your task is to continue the development of a Python command-line simulat
   - `object_pool.py`: Contains the generic `ObjectPool` and `PooledObjectMixin`.
   - `entity.py`: Base `Entity` class, inheriting from `PooledObjectMixin`.
   - `tile.py`: Defines the `Tile` class and the `TILES` dictionary (Land, Water, Mountain).
-  - `pathfinder.py`: Contains the A\* pathfinding logic. `find_path` is its main method.
+  - `pathfinder.py`: Contains the A\* pathfinding logic, now used by `Human` entities for non-food-related wandering.
+  - `flow_field_manager.py`: **(New)** A domain service that uses Breadth-First Search (BFS) to generate a vector field (flow field) pointing towards goals (e.g., food).
   - `entity_manager.py`: Manages entity lifecycle: object pools, creation (`create_human`), storage (`entities` list), and cleanup.
   - `spawning_manager.py`: Manages all rules for entity spawning: natural rice spawning, reproduction placement, and the replanting queue.
-  - `human.py`: Logic for the `Human` entity. Collaborates with the `World` and its managers to find food and move.
+  - `human.py`: Logic for the `Human` entity. Implements a **hybrid movement model**, switching between following the `World`'s flow field when hungry and using the `Pathfinder` to generate its own `path` for wandering when sated.
   - `rice.py`: Logic for the `Rice` entity. Implements a `get_eaten()` method.
-  - `world.py`: Acts as the central **coordinator/facade** for the domain. It holds the map `grid` and orchestrates the `game_tick`, delegating tasks to its managers (`EntityManager`, `Pathfinder`, `SpawningManager`).
+  - `world.py`: Acts as the central **coordinator/facade** for the domain. It holds the map `grid` and orchestrates the `game_tick`, delegating tasks to its managers. It now owns the `FlowFieldManager` and is responsible for periodically regenerating the `food_flow_field`.
 - `tests/`: **Testing Layer.**
   - `__init__.py`: Marks as a package.
   - `conftest.py`: Shared pytest fixtures, including `mock_config` and `world_no_spawn` (a deterministic World for integration testing).
   - `test_object_pool.py`: Unit tests for the `ObjectPool`.
   - `test_pathfinder.py`: Unit tests for the `Pathfinder` class.
+  - `test_flow_field_manager.py`: **(New)** Unit tests for the `FlowFieldManager`, verifying correct vector generation.
   - `test_entity_manager.py`: Unit tests for `EntityManager`, including pooling and finding entities.
   - `test_spawning_manager.py`: Unit tests for `SpawningManager` rules and replanting.
-  - `test_human_logic.py`: Unit tests for `Human` logic, using a `MockWorld`.
+  - `test_human_logic.py`: Unit tests for `Human` logic, using a `MockWorld` that can provide a mock flow field to test the new hybrid movement logic.
   - `test_rice_logic.py`: Unit tests for `Rice` logic.
-  - `test_world_logic.py`: High-level integration tests for the `World`'s orchestration logic.
-  - `test_domain_integration.py`: **Crucial** mid-level integration tests that verify collaboration between multiple domain components.
+  - `test_world_logic.py`: High-level integration tests for the `World`'s orchestration logic. (This file might be merged or deprecated in favor of `test_domain_integration`).
+  - `test_domain_integration.py`: **Crucial** mid-level integration tests that verify collaboration between domain components, now including tests for the `World`'s flow field generation and the `Human`'s correct interaction with it.
 
 **Recent Accomplishments & Key Learnings:**
 
-1.  **Domain Layer Refactoring:** The `domain/world.py` "God Object" was decomposed into specialized manager classes (`EntityManager`, `Pathfinder`, `SpawningManager`).
-2.  **Presentation Layer Refactoring:** The monolithic `cli_main.py` was decomposed into a clean `presentation` package (`main`, `renderer`, `input_handler`, `game_loop`).
-3.  **Strengthening Architectural Boundaries:** Refactored `GameService` to provide a clean API and moved UI-specific command interpretation into the `game_loop`.
-4.  **Input System Overhaul for Responsiveness:** To fix laggy camera movement, we re-architected the input system. We first decoupled it from the game tick, but identified the OS key-repeat delay as a remaining issue. We then implemented a professional, **state-based input model** using the `keyboard` library. The `input_handler` now tracks key-down/key-up state, and the `game_loop` reads this state every frame, resulting in perfectly smooth, instantaneous camera control. This was a key lesson in event-based vs. state-based input handling.
+1.  **Implemented a Scalable Flow Field System:** We replaced inefficient, per-entity A\* pathfinding for food with a centralized flow field system. The new `FlowFieldManager` generates a single, efficient vector field from all food sources, which hungry entities can follow. This solves the "thundering herd" performance bottleneck.
+2.  **Developed a Hybrid AI Model:** We evolved the `Human`'s AI from a simple model to a more sophisticated hybrid one. It now intelligently switches between two behaviors: following the flow field when hungry and using its own A\* path for wandering when sated. This provides both performance and behavioral richness.
+3.  **Strict TDD Process Proved Effective:** The development was rigorously driven by tests. This process was instrumental in discovering and fixing several subtle bugs in the implementation, test logic, and entity lifecycle interactions, leading to a much more robust final product.
+4.  **Maintained Architectural Discipline:** We successfully introduced a new domain service while adhering to our architectural principles. We also consciously deferred a potential optimization (a Quadtree for proximity checks) to avoid scope creep, demonstrating a pragmatic approach to managing technical debt.
 
 **IMPORTANT: Our Interaction Model**
 **Development Workflow:**

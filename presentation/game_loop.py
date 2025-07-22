@@ -57,6 +57,8 @@ def game_loop(
                         game_service.speed_up()
                     elif command == "__SPEED_DOWN__":
                         game_service.speed_down()
+                    elif command == "__TOGGLE_FLOW_FIELD__":  # <-- NEW COMMAND HANDLING
+                        game_service.toggle_flow_field_visibility()
                     elif command.lower() in ["q", "quit", "exit"]:
                         raise SystemExit()  # Use SystemExit for clean shutdown
                     else:

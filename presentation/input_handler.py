@@ -91,9 +91,13 @@ def input_handler(command_queue, shared_state):
                 elif k == "-":
                     command_queue.put("__SPEED_DOWN__")
                     return
+                elif k == "f":  # <-- NEW HOTKEY
+                    command_queue.put("__TOGGLE_FLOW_FIELD__")
+                    return
                 # State-based movement keys
                 if key_name in MOVEMENT_KEYS:
                     shared_state["keys_down"][key_name] = True
+                    return
                     return
 
             # --- Priority 3: If no hotkey was pressed, start text entry ---

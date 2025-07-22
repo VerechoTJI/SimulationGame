@@ -2,6 +2,7 @@
 import os
 import re
 import sys
+import numpy as np  # <-- NEW IMPORT
 
 CLEAR_METHOD = "ansi"  # or "system"
 
@@ -94,7 +95,41 @@ def _render_main_view(
 ) -> tuple[list[str], int, int]:
     """Renders the central view with the map and the right-hand status panel."""
     Colors = render_data["colors"]
+
     full_map_grid = render_data["display_grid"]
+
+    if render_data.get("show_flow_field", False):
+        flow_field_data = render_data.get("flow_field_data")
+        if flow_field_data is not None:
+            # --- START OF FIX ---
+            # full_map_grid is already a list of lists of strings. We just need to copy it.
+            flow_grid = [row[:] for row in full_map_grid]  # Create a mutable copy
+
+            # Vector to arrow mapping
+            arrow_map = {
+                (0, 0): "·",  # Center / Goal
+                (0, -1): "↑",  # North
+                (0, 1): "↓",  # South
+                (-1, 0): "←",  # West
+                (1, 0): "→",  # East
+                (-1, -1): "↖",  # North-West
+                (1, -1): "↗",  # North-East
+                (-1, 1): "↙",  # South-West
+                (1, 1): "↘",  # South-East
+            }
+
+            for y in range(flow_field_data.shape[0]):
+                for x in range(flow_field_data.shape[1]):
+                    # Check bounds just in case of mismatch, though they should be the same
+                    if y < len(flow_grid) and x < len(flow_grid[y]):
+                        vx, vy = flow_field_data[y, x]
+                        vector_tuple = (int(vx), int(vy))
+                        arrow = arrow_map.get(vector_tuple, "?")
+                        flow_grid[y][x] = Colors.BLUE + arrow
+
+            full_map_grid = flow_grid
+            # --- END OF FIX ---
+
     full_map_height = len(full_map_grid)
     full_map_width = len(full_map_grid[0]) if full_map_height > 0 else 0
 
@@ -123,7 +158,12 @@ def _render_main_view(
                 row = full_map_grid[row_y][
                     clamped_camera_x : clamped_camera_x + map_viewport_width
                 ]
-                visible_map_slice.append(" ".join(row) + Colors.RESET)
+                # If we're showing the flow field, the symbols are single characters
+                # so we can join with a space. Otherwise, it handles the multi-char symbols.
+                joiner = " " if render_data.get("show_flow_field", False) else " "
+                visible_map_slice.append(joiner.join(row) + Colors.RESET)
+
+    # Correct the visible character width calculation based on the actual rendered slice
     if len(visible_map_slice) > 0:
         map_viewport_width_chars = get_visible_length(visible_map_slice[0])
 
@@ -195,8 +235,9 @@ def _render_footer(
     padding_needed = log_area_height - len(display_logs)
     buffer.extend([""] * max(0, padding_needed))
 
+    # <-- MODIFIED: Update help text with the new 'f' key.
     buffer.append(
-        "Hotkeys: wasd(scroll) p(pause) n(next) +/-(speed) | Cmd: sp <type> <x> <y> | q(quit)"
+        "Hotkeys: wasd(scroll) f(flow) p(pause) n(next) +/-(speed) | Cmd: sp <type> <x> <y> | q(quit)"
     )
 
     # Add input prompt

@@ -1,10 +1,10 @@
 {
   "simulation": {
-    "grid_width": 128,
-    "grid_height": 64,
+    "grid_width": 64,
+    "grid_height": 32,
     "tick_seconds": 0.01666,
     "tile_size_meters": 1,
-    "flow_field_update_interval": 100
+    "flow_field_update_interval": 0
   },
   "controls": {
     "speed_adjust_factor": 2,

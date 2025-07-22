@@ -10,6 +10,7 @@ class GameService:
     def __init__(self, grid_width, grid_height, tile_size):
         self.world = World(grid_width, grid_height, tile_size, config_data=config.data)
         self._is_paused = False
+        self._show_flow_field = False  # <-- NEW: State for the debug view
         self._base_tick_seconds = config.get("simulation", "tick_seconds")
         self._tick_seconds = self._base_tick_seconds
         self._speed_adjust_factor = config.get("controls", "speed_adjust_factor")
@@ -20,7 +21,9 @@ class GameService:
         """Add initial welcome messages."""
         self.world.add_log("Welcome to the simulation!")
         self.world.add_log("The world has been generated.")
-        self.world.add_log("Use hotkeys to control: p=pause, n=next, +/-=speed")
+        self.world.add_log(
+            "Use hotkeys to control: p=pause, n=next,  +/-=speed, f=flow"
+        )
 
     def is_paused(self) -> bool:
         """Public method to check if the simulation is paused."""
@@ -31,6 +34,14 @@ class GameService:
         self._is_paused = not self._is_paused
         status = "PAUSED" if self._is_paused else "RUNNING"
         self.world.add_log(f"Simulation {status}.")
+
+    def toggle_flow_field_visibility(self):  # <-- NEW METHOD
+        """Toggles the visibility of the flow field debug view."""
+        self._show_flow_field = not self._show_flow_field
+        status = "shown" if self._show_flow_field else "hidden"
+        self.world.add_log(
+            f"{Colors.BLUE}Flow field visualization {status}.{Colors.RESET}"
+        )
 
     def force_tick(self):
         """Forces a single game tick, intended for use only when paused."""
@@ -125,7 +136,7 @@ class GameService:
                     color = Colors.WHITE
                 display_grid[grid_y][grid_x] = color + entity.symbol
 
-        return {
+        render_payload = {
             "display_grid": display_grid,
             "width": self.world.width,
             "tick": self.world.tick_count,
@@ -136,4 +147,9 @@ class GameService:
             "is_paused": self._is_paused,
             "tick_seconds": self._tick_seconds,
             "base_tick_seconds": self._base_tick_seconds,
+            "show_flow_field": self._show_flow_field,  # <-- NEW: Always include the flag
         }
+        if self._show_flow_field:
+            # If the view is active, add the flow field data to the payload
+            render_payload["flow_field_data"] = self.world.food_flow_field
+        return render_payload
