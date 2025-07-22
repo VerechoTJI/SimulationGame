@@ -1,4 +1,4 @@
-### **New Start Prompt** v0.1
+### **New Start Prompt** v0.2
 
 Hello! Your task is to continue the development of a Python command-line simulation game. The project follows Domain-Driven Design (DDD), Test-Driven Development (TDD), and Clean Architecture principles.
 
@@ -8,7 +8,7 @@ Hello! Your task is to continue the development of a Python command-line simulat
 
 - **Domain-Driven Design (DDD):** Code is separated into `Presentation`, `Application`, and `Domain` layers. The `Domain` layer contains the core business logic and is completely independent.
 - **Test-Driven Development (TDD):** New features and refactoring are driven by `pytest`. We write failing tests first (or ensure existing tests fail correctly before a fix), then implement the logic to make them pass.
-- **Clean Architecture:** Dependencies point inwards (`Presentation` -> `Application` -> `Domain`). The `World` class acts as a facade, orchestrating specialized manager classes within the domain.
+- **Clean Architecture:** Dependencies point inwards (`Presentation` -> `Application` -> `Domain`). The `GameService` exposes use cases, and the `World` class acts as a domain facade.
 
 **Key Project Specifications:**
 
@@ -23,11 +23,17 @@ Hello! Your task is to continue the development of a Python command-line simulat
 **Project File Hierarchy & Explanations:**
 
 - `config.json`: Data file for all simulation parameters.
-- `cli_main.py`: **Presentation Layer.** Renders game state and handles user input.
+- `cli_main.py`: **Minimal entry point.** Only responsible for setting up the Python path and calling the main run function.
+- `presentation/`: **Presentation Layer.** Responsible for all user-facing logic (rendering, input).
+  - `__init__.py`: Marks as a package.
+  - `main.py`: Orchestrates the CLI application. Initializes services, shared state, and threads, and handles application startup/teardown.
+  - `input_handler.py`: Contains `NonBlockingInput` class and the `input_handler` thread function for capturing all keyboard input.
+  - `renderer.py`: Contains the `display` function responsible for drawing the entire game state to the terminal.
+  - `game_loop.py`: Contains the primary `game_loop`. It manages the command queue, calls `GameService` methods based on user input, controls the tick timer, and triggers rendering.
 - `application/`: **Application Layer.**
   - `__init__.py`: Marks as a package.
   - `config.py`: Singleton for loading `config.json`.
-  - `game_service.py`: Main entry point for the CLI. Orchestrates the domain layer by interacting with the `World` facade.
+  - `game_service.py`: Exposes application use cases (e.g., `toggle_pause`, `speed_up`, `execute_user_command`). It orchestrates the domain layer by interacting with the `World` facade.
 - `domain/`: **Domain Layer.**
   - `__init__.py`: Marks as a package.
   - `object_pool.py`: Contains the generic `ObjectPool` and `PooledObjectMixin`.
@@ -53,16 +59,9 @@ Hello! Your task is to continue the development of a Python command-line simulat
 
 **Recent Accomplishments & Key Learnings:**
 
-We have just completed a major, successful refactoring of the domain layer to improve its architecture and adhere to the Single Responsibility Principle.
-
-- **The Accomplishment:** The `domain/world.py` "God Object" has been broken down. Its tangled responsibilities are now handled by clean, specialized, and independently testable manager classes.
-- **The Solution:**
-  1.  `Pathfinder` was created to handle all A\* pathfinding.
-  2.  `EntityManager` was created to handle the entity list, object pools, and entity lifecycle.
-  3.  `SpawningManager` was created to handle all rule-based spawning and replanting.
-  4.  The `World` class was simplified to be a pure orchestrator, delegating calls to these managers.
-- **The TDD Process in Action:** The refactoring was done safely by first moving tests, then moving code. We migrated tests for pathfinding and spawning to their new homes (`test_pathfinder.py`, `test_spawning_manager.py`). We then fixed all resulting test failures across the project by updating mocks (`test_human_logic.py`) and application layer calls (`game_service.py`).
-- **Key Learning: Strengthening the Testing Pyramid:** We discovered that unit tests with mocks can't catch integration errors between real components. To solve this, we created `tests/test_domain_integration.py`, which forms the "middle layer" of our testing pyramid. These tests ensure our domain objects collaborate correctly, providing a vital safety net that unit tests alone cannot.
+1.  **Domain Layer Refactoring:** The `domain/world.py` "God Object" was successfully decomposed into specialized, independently testable manager classes (`EntityManager`, `Pathfinder`, `SpawningManager`). This was a major step in aligning with the Single Responsibility Principle and was achieved safely using TDD.
+2.  **Presentation Layer Refactoring:** The monolithic `cli_main.py` was decomposed into a clean `presentation` package with distinct modules for input, rendering, game loop control, and application setup. This greatly improved modularity.
+3.  **Strengthening Architectural Boundaries:** During the presentation refactor, we learned to enforce a stricter separation of concerns. We refactored `GameService` to provide a clean, semantic API (`toggle_pause()`, etc.) and moved the responsibility of interpreting UI-specific commands (like `__PAUSE_TOGGLE__`) into the `game_loop`, where it belongs. This prevents the Application layer from being polluted with UI details.
 
 **IMPORTANT: Our Interaction Model**
 **Development Workflow:**
@@ -75,11 +74,10 @@ We have just completed a major, successful refactoring of the domain layer to im
 - **Phase 2: The Execution:** Once the plan is approved, we will execute it one step at a time, starting with tests.
 
 **Context-Limited Mode & Our Core Rule:**
-To ensure accuracy, I operate in a context-limited mode and do not have persistent memory of file contents. Therefore, we will adhere to the following strict process:
+To ensure accuracy, you operate in a context-limited mode and do not have persistent memory of file contents. Therefore, we will adhere to this strict process:
 
-1.  Before writing any test or implementation code, you MUST first identify the primary file to be modified AND its critical dependencies. You will then request the full code for all of these files at once to understand their contracts.
+1.  Before writing any test or implementation code, you MUST first identify the primary file to modify and its critical dependencies. You will then request the full code for all these files at once.
     - _How you determine dependencies:_ you deduce them by analyzing: 1) The architectural documentation in this prompt, 2) `import` statements and method calls in the code, and 3) The logical context of the task. You can also request extra code for more context.
 2.  You **do not** have the full code for every module memorized. You must rely on the file hierarchy and explanations provided above as your primary "map" of the project.
-3.  Your understanding of an unseen module is limited. You can speculate its function based on these names and our TDD philosophy.
-4.  **Before you suggest any modifications to an existing file, you MUST first ask me to provide its full and current code.** For example, say: "Understood. We may need to modify `domain/human.py`, please provide me with the full contents of that file."
-5.  When providing code, you will typically only post the modified part of the code unless a full file replacement is necessary.
+3.  **Before you suggest any modifications to an existing file, you MUST first ask me to provide its full and current code.** For example, say: "Understood. We need to modify `domain/human.py` and `domain/world.py`. Please provide me with the full contents of both files."
+4.  When providing code, you will typically only post the modified part unless a full file replacement is necessary.
