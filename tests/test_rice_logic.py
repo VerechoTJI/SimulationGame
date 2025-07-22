@@ -8,9 +8,6 @@ class MockWorld:
     pass
 
 
-# The rice_plant fixture is now provided by conftest.py, so we can remove it from here.
-
-
 class TestRice:
     # --- MODIFIED: The test now uses the globally available 'rice_plant' fixture ---
     def test_rice_get_eaten_sets_flag(self, rice_plant):
@@ -23,20 +20,21 @@ class TestRice:
         rice_plant.get_eaten()
         assert rice_plant.is_alive() is False
 
-    def test_rice_matures_at_half_max_age(self, rice_plant):
+    def test_rice_matures_age(self, rice_plant):
         # The tick method needs a world-like object, even a simple one.
         mock_world = MockWorld()
         rice_plant.age = 0
 
-        assert not rice_plant.matured, "New rice plant should not be mature"
         assert rice_plant.age == 0
+        assert not rice_plant.matured, "New rice plant should not be mature"
 
         # Tick until just before mature
-        # max_age is now 16 from the config, so half is 8. Tick 7 times.
-        for _ in range(7):
+        for _ in range(rice_plant.mature_age - 1):
             rice_plant.tick(mock_world)
 
-        assert not rice_plant.matured, "Rice at age 7 should not be mature"
+        assert (
+            not rice_plant.matured
+        ), "Rice at 1 less tan mature_age should not be mature"
         rice_plant.tick(mock_world)
-        assert rice_plant.matured, "Rice at age 8 should be mature"
-        assert rice_plant.age == 8
+        assert rice_plant.matured, "Rice at mature_age should be mature"
+        assert rice_plant.age == rice_plant.mature_age

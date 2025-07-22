@@ -6,7 +6,7 @@ import sys
 CLEAR_METHOD = "ansi"  # or "system"
 
 # --- Constants for layout ---
-MIN_WIDTH = 80
+MIN_WIDTH = 90
 MIN_HEIGHT = 20
 HEADER_HEIGHT = 1
 # Specific constants for footer components for clarity and accurate calculation
@@ -42,7 +42,13 @@ def _render_minimal_view(
         f"Tick: {render_data['tick']} ({logic_tps:.1f} tps) | Entities: {render_data['entity_count']}",
         "-" * terminal_width,
         "Hotkeys: p(pause) +/- (speed) q(quit)",
+        "--- Log ---",
     ]
+
+    display_logs = render_data.get("logs", [])[
+        -(terminal_height - len(buffer) - 1) :
+    ]  # -1, leaving room for prompt
+    buffer.extend(display_logs)
 
     # Pad to fill vertical space, leaving room for prompt
     padding_needed = terminal_height - len(buffer) - 1
@@ -98,11 +104,11 @@ def _render_main_view(
     col_separator_width = 3
 
     right_panel_width = base_col_width
-    # Attempt to fit two columns if space allows
+    # Attempt to fit 2 columns if space allows
     if terminal_width > (base_col_width * 2 + col_separator_width + 60):
         right_panel_width = base_col_width * 2 + col_separator_width
 
-    map_viewport_width_chars = terminal_width - right_panel_width - 3  # 3 for " | "
+    map_viewport_width_chars = terminal_width - right_panel_width - 2  # 3 for " | "
     map_viewport_width = max(10, map_viewport_width_chars // 2)
 
     # --- Camera Clamping & Map Slicing ---
@@ -118,13 +124,19 @@ def _render_main_view(
                     clamped_camera_x : clamped_camera_x + map_viewport_width
                 ]
                 visible_map_slice.append(" ".join(row) + Colors.RESET)
+    if len(visible_map_slice) > 0:
+        map_viewport_width_chars = get_visible_length(visible_map_slice[0])
 
     # --- Right Panel Content ---
     right_panel_lines = [
         f"Tick: {render_data['tick']} | Entities: {render_data['entity_count']}",
         "--- Humans ---",
     ]
-    max_cols = 1 if right_panel_width == base_col_width else 2
+    # Attempt to fit more columns if space allows
+    extra_col = (terminal_width - map_viewport_width_chars - right_panel_width - 2) // (
+        base_col_width + col_separator_width
+    )
+    max_cols = 1 if right_panel_width == base_col_width else 2 + extra_col
     data_rows = view_height - 2  # 2 header lines in panel
     if data_rows > 0:
         display_capacity = data_rows * max_cols
@@ -149,9 +161,8 @@ def _render_main_view(
     combined_lines = []
     for i in range(view_height):
         map_part = visible_map_slice[i] if i < len(visible_map_slice) else ""
-        map_padding = " " * (map_viewport_width_chars - get_visible_length(map_part))
         panel_part = right_panel_lines[i] if i < len(right_panel_lines) else ""
-        combined_lines.append(f"{map_part}{map_padding} | {panel_part}")
+        combined_lines.append(f"{map_part}| {panel_part}")
 
     return combined_lines, clamped_camera_x, clamped_camera_y
 
@@ -264,8 +275,6 @@ def display(
             write_buffer.append(padded_line)
             if i < terminal_height - 1:
                 write_buffer.append("\n")
-
-        write_buffer.append("\033[?25h")  # Show cursor
         write_buffer.append("\033[3J")  # Clear scroll
         sys.stdout.write("".join(write_buffer))
     else:

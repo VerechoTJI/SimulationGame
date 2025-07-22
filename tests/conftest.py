@@ -35,6 +35,7 @@ def mock_config():
             "rice": {
                 "attributes": {
                     "max_age": 16,
+                    "mature_age": 8,
                     "saturation_yield": 50,
                 },
                 "spawning": {
