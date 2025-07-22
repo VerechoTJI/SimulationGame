@@ -1,17 +1,16 @@
 # presentation/game_loop.py
 import time
 import queue
-import os
-import sys
 import traceback
 
 from presentation.renderer import display
-from presentation.input_handler import NonBlockingInput
+
+# Removed NonBlockingInput import
 
 
 def game_loop(
-    game_service, command_queue, shared_state, nb_input_for_cleanup: NonBlockingInput
-):
+    game_service, command_queue, shared_state, camera_move_increment
+):  # MODIFIED signature
     """
     The main loop of the game, handling ticks, rendering, and command processing.
     """
@@ -22,51 +21,62 @@ def game_loop(
     render_fps = 0.0
     logic_tps = 0.0
 
+    # Local camera state for smooth movement
+    with shared_state["lock"]:
+        camera_x = shared_state["camera_x"]
+        camera_y = shared_state["camera_y"]
+
     try:
         while True:
-            # Process any pending commands from the input thread
-            try:
-                command = command_queue.get_nowait()
-
-                # --- NEW: Command Interpretation Logic ---
-                if command == "__PAUSE_TOGGLE__":
-                    game_service.toggle_pause()
-                elif command == "__FORCE_TICK__":
-                    game_service.force_tick()
-                elif command == "__SPEED_UP__":
-                    game_service.speed_up()
-                elif command == "__SPEED_DOWN__":
-                    game_service.speed_down()
-                elif command.lower() in ["q", "quit", "exit"]:
-                    return  # Exit the loop cleanly
-                else:
-                    # It's a user-typed command
-                    game_service.execute_user_command(command)
-
-            except queue.Empty:
-                pass
-
-            # Check if it's time for a scheduled game tick
-            current_tick_seconds = game_service.get_render_data()["tick_seconds"]
             current_time = time.time()
+            tick_occurred_this_frame = False
+
+            # --- NEW: Process camera movement based on key state every frame ---
+            with shared_state["lock"]:
+                keys = shared_state["keys_down"]
+                if keys["w"]:
+                    camera_y -= camera_move_increment
+                if keys["s"]:
+                    camera_y += camera_move_increment
+                if keys["a"]:
+                    camera_x -= camera_move_increment
+                if keys["d"]:
+                    camera_x += camera_move_increment
+
+            # Process all pending non-movement commands
+            while not command_queue.empty():
+                try:
+                    command = command_queue.get_nowait()
+                    # --- REFACTORED: Removed UI camera commands ---
+                    if command == "__PAUSE_TOGGLE__":
+                        game_service.toggle_pause()
+                    elif command == "__FORCE_TICK__":
+                        if game_service.force_tick():
+                            tick_occurred_this_frame = True
+                    elif command == "__SPEED_UP__":
+                        game_service.speed_up()
+                    elif command == "__SPEED_DOWN__":
+                        game_service.speed_down()
+                    elif command.lower() in ["q", "quit", "exit"]:
+                        raise SystemExit()  # Use SystemExit for clean shutdown
+                    else:
+                        game_service.execute_user_command(command)
+                except queue.Empty:
+                    break
+
+            # Scheduled game tick logic
+            current_tick_seconds = game_service.get_render_data()["tick_seconds"]
             if (
                 not game_service.is_paused()
                 and current_time - last_timed_tick_time >= current_tick_seconds
             ):
                 game_service.tick()
+                tick_occurred_this_frame = True
                 last_timed_tick_time = current_time
-
-            # Get final data for this frame
-            final_render_data = game_service.get_render_data()
-            tick_before = final_render_data["tick"]
-            game_service.tick()  # This is a placeholder call, actual tick is conditional above. Let's fix this.
-            tick_after = game_service.get_render_data()["tick"]
 
             # Update performance metrics
             render_frame_count += 1
-            # We need to get the tick count *before* and *after* the potential tick call
-            tick_after_data = game_service.get_render_data()
-            if tick_after_data["tick"] > final_render_data["tick"]:
+            if tick_occurred_this_frame:
                 logic_tick_count += 1
 
             elapsed_time = current_time - last_fps_update_time
@@ -77,35 +87,33 @@ def game_loop(
                 logic_tick_count = 0
                 last_fps_update_time = current_time
 
-            # Add performance data to the final render payload
+            # Rendering using local and shared state
+            final_render_data = game_service.get_render_data()
             final_render_data["render_fps"] = render_fps
             final_render_data["logic_tps"] = logic_tps
 
-            # Read shared state for rendering
             with shared_state["lock"]:
                 current_input_list = list(shared_state["input_buffer"])
                 cursor_pos = shared_state["cursor_pos"]
-                camera_x = shared_state["camera_x"]
-                camera_y = shared_state["camera_y"]
 
-            # Render the screen
             clamped_x, clamped_y = display(
                 final_render_data, current_input_list, cursor_pos, camera_x, camera_y
             )
 
-            # Update shared state with clamped camera values
+            camera_x, camera_y = clamped_x, clamped_y
             with shared_state["lock"]:
-                shared_state["camera_x"] = clamped_x
-                shared_state["camera_y"] = clamped_y
-
-            # Small sleep to prevent CPU maxing out
-            time.sleep(0.008)
+                shared_state["camera_x"] = camera_x
+                shared_state["camera_y"] = camera_y
+            sleep_time = max(0, 0.00833 - time.time() + current_time)
+            time.sleep(sleep_time)
 
     except Exception:
-        nb_input_for_cleanup.restore_terminal()
+        # Using sys.exit() or os._exit() might not allow the main finally block to run
+        # So we print the error here and then re-raise to be caught by main.
         print("\n" * 5)
         print("=" * 20, " A FATAL ERROR OCCURRED IN GAME LOOP ", "=" * 20)
         traceback.print_exc()
         print("=" * 60)
         print("Game has been terminated.")
-        os._exit(1)  # Force exit
+        # Re-raise the exception so the main thread's finally block is triggered
+        raise

@@ -4,9 +4,10 @@ import os
 import threading
 import queue
 
+# Removed NonBlockingInput as it's replaced by the 'keyboard' library
+from presentation.input_handler import input_handler
 from application.game_service import GameService
 from application.config import config
-from presentation.input_handler import input_handler, NonBlockingInput
 from presentation.game_loop import game_loop
 from presentation.renderer import display
 
@@ -16,7 +17,7 @@ def run():
     if sys.platform == "win32":
         os.system("cls")
 
-    # Shared state between input thread and main loop
+    # --- MODIFIED: Shared state between input thread and main loop ---
     shared_state = {
         "input_buffer": [],
         "cursor_pos": 0,
@@ -25,6 +26,7 @@ def run():
         "history_index": 0,
         "camera_x": 0,
         "camera_y": 0,
+        "keys_down": {"w": False, "a": False, "s": False, "d": False},  # NEW
     }
 
     command_queue = queue.Queue()
@@ -36,8 +38,8 @@ def run():
     )
     game_service.initialize_world()
 
-    # This instance is created here solely to be passed for cleanup in case of a crash.
-    nb_input_for_cleanup = NonBlockingInput()
+    # --- NEW: Get camera speed from config ---
+    camera_move_increment = config.get("controls", "camera_move_increment")
 
     try:
         # Initial render before starting loops
@@ -55,12 +57,13 @@ def run():
         )
         input_thread.start()
 
-        # Start the main game loop
-        game_loop(game_service, command_queue, shared_state, nb_input_for_cleanup)
+        # --- MODIFIED: Start the main game loop, passing new config value ---
+        # Note: The nb_input_for_cleanup argument is removed
+        game_loop(game_service, command_queue, shared_state, camera_move_increment)
 
-    except KeyboardInterrupt:
-        print("\nGame interrupted by user.")
+    except (KeyboardInterrupt, SystemExit):
+        print("\nGame interrupted by user. Exiting.")
     finally:
-        print("Restoring terminal and exiting.")
-        nb_input_for_cleanup.restore_terminal()
+        # No terminal restoration is needed as 'keyboard' lib handles it
+        # or doesn't interfere in the same way.
         os._exit(0)

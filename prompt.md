@@ -1,4 +1,4 @@
-### **New Start Prompt** v0.2
+### **New Start Prompt** v0.3
 
 Hello! Your task is to continue the development of a Python command-line simulation game. The project follows Domain-Driven Design (DDD), Test-Driven Development (TDD), and Clean Architecture principles.
 
@@ -12,7 +12,7 @@ Hello! Your task is to continue the development of a Python command-line simulat
 
 **Key Project Specifications:**
 
-- **Technology:** Python, `numpy`, `perlin-noise`, `pytest`.
+- **Technology:** Python, `numpy`, `perlin-noise`, `pytest`, `keyboard`.
 - **Architecture:** Multi-threaded (fast render loop, slower logic tick), data-driven via `config.json`.
 - **World:** A grid-based map with Land, Water, and Mountain tiles affecting movement.
 - **Entities:**
@@ -22,14 +22,14 @@ Hello! Your task is to continue the development of a Python command-line simulat
 
 **Project File Hierarchy & Explanations:**
 
-- `config.json`: Data file for all simulation parameters.
+- `config.json`: Data file for all simulation parameters, including controls like `camera_move_increment`.
 - `cli_main.py`: **Minimal entry point.** Only responsible for setting up the Python path and calling the main run function.
 - `presentation/`: **Presentation Layer.** Responsible for all user-facing logic (rendering, input).
   - `__init__.py`: Marks as a package.
-  - `main.py`: Orchestrates the CLI application. Initializes services, shared state, and threads, and handles application startup/teardown.
-  - `input_handler.py`: Contains `NonBlockingInput` class and the `input_handler` thread function for capturing all keyboard input.
+  - `main.py`: Orchestrates the CLI application. Initializes services, the `shared_state` dictionary (including `keys_down`), and threads, and handles application startup/teardown.
+  - `input_handler.py`: Uses the `keyboard` library's event hooks (`on_press`/`on_release`) to manage user input. For movement keys (`w,a,s,d`), it updates a `keys_down` dictionary in `shared_state`. For all other keys, it manages the text input buffer or places commands on the `command_queue`.
   - `renderer.py`: Contains the `display` function responsible for drawing the entire game state to the terminal.
-  - `game_loop.py`: Contains the primary `game_loop`. It manages the command queue, calls `GameService` methods based on user input, controls the tick timer, and triggers rendering.
+  - `game_loop.py`: Contains the primary `game_loop`. On every frame, it reads the `shared_state['keys_down']` for smooth camera movement. It also drains the `command_queue` for game logic commands and controls the timed game tick, cleanly separating UI updates from logic updates.
 - `application/`: **Application Layer.**
   - `__init__.py`: Marks as a package.
   - `config.py`: Singleton for loading `config.json`.
@@ -51,17 +51,18 @@ Hello! Your task is to continue the development of a Python command-line simulat
   - `test_object_pool.py`: Unit tests for the `ObjectPool`.
   - `test_pathfinder.py`: Unit tests for the `Pathfinder` class.
   - `test_entity_manager.py`: Unit tests for `EntityManager`, including pooling and finding entities.
-  - `test_spawning_manager.py`: Unit tests for `SpawningManager` rules and replanting. (Incorporates tests from the deleted `test_world_spawning.py`).
-  - `test_human_logic.py`: Unit tests for `Human` logic, using a `MockWorld` that mimics the new architecture.
+  - `test_spawning_manager.py`: Unit tests for `SpawningManager` rules and replanting.
+  - `test_human_logic.py`: Unit tests for `Human` logic, using a `MockWorld`.
   - `test_rice_logic.py`: Unit tests for `Rice` logic.
-  - `test_world_logic.py`: High-level integration tests for the `World`'s orchestration logic (e.g., ensuring reproduction correctly uses all managers).
-  - `test_domain_integration.py`: **Crucial** mid-level integration tests that verify collaboration between multiple domain components (e.g., a real `Human` finding food in a real `World`).
+  - `test_world_logic.py`: High-level integration tests for the `World`'s orchestration logic.
+  - `test_domain_integration.py`: **Crucial** mid-level integration tests that verify collaboration between multiple domain components.
 
 **Recent Accomplishments & Key Learnings:**
 
-1.  **Domain Layer Refactoring:** The `domain/world.py` "God Object" was successfully decomposed into specialized, independently testable manager classes (`EntityManager`, `Pathfinder`, `SpawningManager`). This was a major step in aligning with the Single Responsibility Principle and was achieved safely using TDD.
-2.  **Presentation Layer Refactoring:** The monolithic `cli_main.py` was decomposed into a clean `presentation` package with distinct modules for input, rendering, game loop control, and application setup. This greatly improved modularity.
-3.  **Strengthening Architectural Boundaries:** During the presentation refactor, we learned to enforce a stricter separation of concerns. We refactored `GameService` to provide a clean, semantic API (`toggle_pause()`, etc.) and moved the responsibility of interpreting UI-specific commands (like `__PAUSE_TOGGLE__`) into the `game_loop`, where it belongs. This prevents the Application layer from being polluted with UI details.
+1.  **Domain Layer Refactoring:** The `domain/world.py` "God Object" was decomposed into specialized manager classes (`EntityManager`, `Pathfinder`, `SpawningManager`).
+2.  **Presentation Layer Refactoring:** The monolithic `cli_main.py` was decomposed into a clean `presentation` package (`main`, `renderer`, `input_handler`, `game_loop`).
+3.  **Strengthening Architectural Boundaries:** Refactored `GameService` to provide a clean API and moved UI-specific command interpretation into the `game_loop`.
+4.  **Input System Overhaul for Responsiveness:** To fix laggy camera movement, we re-architected the input system. We first decoupled it from the game tick, but identified the OS key-repeat delay as a remaining issue. We then implemented a professional, **state-based input model** using the `keyboard` library. The `input_handler` now tracks key-down/key-up state, and the `game_loop` reads this state every frame, resulting in perfectly smooth, instantaneous camera control. This was a key lesson in event-based vs. state-based input handling.
 
 **IMPORTANT: Our Interaction Model**
 **Development Workflow:**

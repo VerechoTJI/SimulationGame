@@ -3,34 +3,35 @@
     "grid_width": 128,
     "grid_height": 64,
     "tick_seconds": 0.01666,
-    "tile_size_meters": 3600
+    "tile_size_meters": 1
   },
   "controls": {
     "speed_adjust_factor": 2,
     "min_tick_seconds": 0.00833,
-    "max_tick_seconds": 2.0
+    "max_tick_seconds": 2.0,
+    "camera_move_increment": 1
   },
   "entities": {
     "human": {
       "attributes": {
-        "max_age": 701280,
-        "move_speed": 3600,
-        "max_saturation": 24,
-        "hungry_threshold": 12,
-        "reproduction_threshold": 20,
-        "reproduction_cost": 10,
-        "reproduction_cooldown": 12960,
-        "newborn_saturation_endowment": 10
+        "max_age": 3200,
+        "move_speed": 1,
+        "max_saturation": 100,
+        "hungry_threshold": 50,
+        "reproduction_threshold": 40,
+        "reproduction_cost": 20,
+        "reproduction_cooldown": 320,
+        "newborn_saturation_endowment": 20
       }
     },
     "rice": {
       "attributes": {
-        "max_age": 17532,
-        "mature_age": 8766,
-        "saturation_yield": 20
+        "max_age": 200,
+        "mature_age": 100,
+        "saturation_yield": 60
       },
       "spawning": {
-        "natural_spawn_chance": 0.3
+        "natural_spawn_chance": 0.7
       }
     }
   }
