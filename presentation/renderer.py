@@ -68,9 +68,9 @@ def _render_header(
     current_tick = render_data.get("tick_seconds", 0.3)
     speed_multiplier = base_tick / current_tick if current_tick > 0 else float("inf")
 
-    perf_stats = f"Render:{render_data.get('render_fps', 0.0):.1f}fps|Logic:{render_data.get('logic_tps', 0.0):.1f}tps"
-    camera_stats = f"Cam:({clamped_camera_x},{clamped_camera_y})"
-    status_stats = f"Status:{status}|Spd:{speed_multiplier:.1f}x"
+    perf_stats = f"Render: {render_data.get('render_fps', 0.0):.1f}fps | Logic: {render_data.get('logic_tps', 0.0):.1f} tps"
+    camera_stats = f"Camera: ({clamped_camera_x}, {clamped_camera_y})"
+    status_stats = f"Status: {status} | Speed: {speed_multiplier:.1f}x"
     title_text = "--- Simulation ---"
 
     full_title_line = f"{title_text} | {perf_stats} | {camera_stats} | {status_stats}"
@@ -121,7 +121,7 @@ def _render_main_view(
 
     # --- Right Panel Content ---
     right_panel_lines = [
-        f"Tick: {render_data['tick']} | Ent: {render_data['entity_count']}",
+        f"Tick: {render_data['tick']} | Entities: {render_data['entity_count']}",
         "--- Humans ---",
     ]
     max_cols = 1 if right_panel_width == base_col_width else 2
