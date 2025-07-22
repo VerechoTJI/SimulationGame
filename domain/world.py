@@ -9,6 +9,8 @@ from .tile import TILES
 from .pathfinder import Pathfinder
 from .entity_manager import EntityManager
 from .spawning_manager import SpawningManager
+from .flow_field_manager import FlowFieldManager  # <-- IMPORT NEW MANAGER
+from .rice import Rice  # <-- IMPORT RICE FOR TYPE CHECKING
 
 
 class World:
@@ -20,9 +22,23 @@ class World:
         self.grid = self._generate_map()
         self.tick_count = 0
         self.log_messages = []
-        self.pathfinder = Pathfinder(self.grid)
+
+        # --- Instantiate all Domain Managers ---
+        self.pathfinder = Pathfinder(self.grid)  # Kept for non-food pathing
         self.entity_manager = EntityManager(config_data, self.tile_size_meters)
         self.spawning_manager = SpawningManager(self.grid, self.config)
+        self.flow_field_manager = FlowFieldManager(
+            self.grid
+        )  # <-- INSTANTIATE NEW MANAGER
+
+        # --- Flow Field State ---
+        self.food_flow_field = np.zeros((self.height, self.width, 2), dtype=np.int8)
+        self._flow_field_update_interval = self._get_config(
+            "simulation", "flow_field_update_interval", default=100
+        )
+        self._ticks_since_flow_field_update = (
+            self._flow_field_update_interval
+        )  # <-- Update on first tick
 
     def spawn_entity(self, entity_type, x, y):
         """A simplified spawner that only delegates to the EntityManager."""
@@ -34,6 +50,13 @@ class World:
     def game_tick(self):
         self.tick_count += 1
         entities_to_process = list(self.entity_manager.entities)
+
+        # --- Flow Field Update Phase (Periodic) ---
+        if self._ticks_since_flow_field_update >= self._flow_field_update_interval:
+            self._ticks_since_flow_field_update = 0
+            self._update_food_flow_field()
+        else:
+            self._ticks_since_flow_field_update += 1
 
         # --- Spawning Phase ---
         # Get all currently occupied tiles once.
@@ -153,3 +176,22 @@ class World:
             return value
         except (KeyError, TypeError):
             return default
+
+    def _update_food_flow_field(self):
+        """
+        Internal method to find all mature rice and regenerate the food flow field.
+        """
+        food_sources = [
+            self.get_grid_position(e.position)
+            for e in self.entity_manager.entities
+            if isinstance(e, Rice) and e.matured
+        ]
+        self.food_flow_field = self.flow_field_manager.generate_flow_field(food_sources)
+        self.add_log(f"{Colors.BLUE}Food flow field recalculated.{Colors.RESET}")
+
+    def get_flow_vector_at_position(self, world_position):
+        """
+        Public method for entities to get the flow vector at their position.
+        """
+        grid_x, grid_y = self.get_grid_position(world_position)
+        return self.food_flow_field[grid_y, grid_x]

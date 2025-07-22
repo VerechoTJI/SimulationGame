@@ -3,7 +3,8 @@
     "grid_width": 128,
     "grid_height": 64,
     "tick_seconds": 0.01666,
-    "tile_size_meters": 1
+    "tile_size_meters": 1,
+    "flow_field_update_interval": 100
   },
   "controls": {
     "speed_adjust_factor": 2,
