@@ -5,16 +5,16 @@ from .entity import Entity
 
 class Rice(Entity):
     def __init__(
-        self, pos_x, pos_y, max_age: int, mature_age: int, saturation_yield: int
+        self, pos_y, pos_x, max_age: int, mature_age: int, saturation_yield: int
     ):
-        super().__init__("Rice", "r", pos_x, pos_y, max_age=max_age)
+        super().__init__("Rice", "r", pos_y, pos_x, max_age=max_age)
         self.mature_age = mature_age
         self.saturation_yield = saturation_yield
         self.is_eaten = False
 
-    def reset(self, pos_x, pos_y, max_age: int, mature_age: int, saturation_yield: int):
+    def reset(self, pos_y, pos_x, max_age: int, mature_age: int, saturation_yield: int):
         """Resets the Rice plant's state for object pooling."""
-        super().reset("Rice", "r", pos_x, pos_y, max_age=max_age)
+        super().reset("Rice", "r", pos_y, pos_x, max_age=max_age)
         self.mature_age = mature_age
         self.saturation_yield = saturation_yield
         self.is_eaten = False

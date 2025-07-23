@@ -1,3 +1,4 @@
+# domain/human.py
 import numpy as np
 from .entity import Entity, Colors
 from .rice import Rice
@@ -7,8 +8,8 @@ import random
 class Human(Entity):
     def __init__(
         self,
-        pos_x,
         pos_y,
+        pos_x,
         max_age: int,
         move_speed: float,
         max_saturation: int,
@@ -18,7 +19,7 @@ class Human(Entity):
         reproduction_cooldown: int,
         newborn_saturation_endowment: int,
     ):
-        super().__init__("Human", "H", pos_x, pos_y, max_age=max_age)
+        super().__init__("Human", "H", pos_y, pos_x, max_age=max_age)
         self.move_speed = move_speed
         self.path = []
 
@@ -36,8 +37,8 @@ class Human(Entity):
 
     def reset(
         self,
-        pos_x,
         pos_y,
+        pos_x,
         max_age: int,
         move_speed: float,
         max_saturation: int,
@@ -48,7 +49,7 @@ class Human(Entity):
         newborn_saturation_endowment: int,
     ):
         """Resets the Human's state for object pooling."""
-        super().reset("Human", "H", pos_x, pos_y, max_age=max_age)
+        super().reset("Human", "H", pos_y, pos_x, max_age=max_age)
         self.move_speed = move_speed
         self.path = []
 
@@ -119,26 +120,26 @@ class Human(Entity):
             self._move_along_path(world)
 
         # --- FINAL POSITIONING (SHARED) ---
-        max_x = world.width * world.tile_size_meters
         max_y = world.height * world.tile_size_meters
-        self.position[0] = np.clip(self.position[0], 0, max_x - 0.01)
-        self.position[1] = np.clip(self.position[1], 0, max_y - 0.01)
+        max_x = world.width * world.tile_size_meters
+        # position[0] is pos_y
+        # position[1] is pos_x
+        self.position[0] = np.clip(self.position[0], 0, max_y - 0.01)
+        self.position[1] = np.clip(self.position[1], 0, max_x - 0.01)
 
     def _move_along_flow_field(self, world):
         """Moves the human one step based on the world's food flow field."""
         flow_vector_yx = world.get_flow_vector_at_position(self.position)
-        # Convert (dy, dx) from flow field to a movement vector (x, y)
-        move_vector_xy = np.array([flow_vector_yx[1], flow_vector_yx[0]], dtype=float)
 
-        if np.all(move_vector_xy == 0):
+        if np.all(flow_vector_yx == 0):
             # Stuck or no food, wander randomly.
             self._find_new_path(world)
             self._move_along_path(world)
             return
 
-        norm = np.linalg.norm(move_vector_xy)
+        norm = np.linalg.norm(flow_vector_yx)
         if norm > 0:
-            normalized_direction = move_vector_xy / norm
+            normalized_direction = flow_vector_yx / norm
             current_tile = world.get_tile_at_pos(self.position[0], self.position[1])
             effective_speed = self.move_speed * current_tile.tile_move_speed_factor
 
@@ -153,8 +154,8 @@ class Human(Entity):
         target_grid_pos = self.path[0]
         target_pos = np.array(
             [
-                (target_grid_pos[0] + 0.5) * world.tile_size_meters,
-                (target_grid_pos[1] + 0.5) * world.tile_size_meters,
+                (target_grid_pos[0] + 0.5) * world.tile_size_meters,  # y
+                (target_grid_pos[1] + 0.5) * world.tile_size_meters,  # x
             ]
         )
 
@@ -177,13 +178,13 @@ class Human(Entity):
         self.path = []
         start_grid_pos = world.get_grid_position(self.position)
 
-        if world.grid[start_grid_pos[1]][start_grid_pos[0]].tile_move_speed_factor == 0:
+        if world.grid[start_grid_pos[0]][start_grid_pos[1]].tile_move_speed_factor == 0:
             return
 
         for _ in range(10):
-            dest_x = random.randint(0, world.width - 1)
             dest_y = random.randint(0, world.height - 1)
-            path = world.find_path(start_grid_pos, (dest_x, dest_y))
+            dest_x = random.randint(0, world.width - 1)
+            path = world.find_path(start_grid_pos, (dest_y, dest_x))
             if path:
                 self.path = path
                 return
