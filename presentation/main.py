@@ -1,10 +1,10 @@
 # presentation/main.py
+
 import sys
 import os
 import threading
 import queue
-
-# Removed NonBlockingInput as it's replaced by the 'keyboard' library
+import pygetwindow as gw
 from presentation.input_handler import input_handler
 from application.game_service import GameService
 from application.config import config
@@ -17,7 +17,7 @@ def run():
     if sys.platform == "win32":
         os.system("cls")
 
-    # --- MODIFIED: Shared state between input thread and main loop ---
+    # Initialize shared state
     shared_state = {
         "input_buffer": [],
         "cursor_pos": 0,
@@ -26,8 +26,17 @@ def run():
         "history_index": 0,
         "camera_x": 0,
         "camera_y": 0,
-        "keys_down": {"w": False, "a": False, "s": False, "d": False},  # NEW
+        "keys_down": {"w": False, "a": False, "s": False, "d": False},
     }
+
+    # Capture terminal window title
+    try:
+        active_window = gw.getActiveWindow()
+        terminal_window_title = active_window.title if active_window else "Terminal"
+    except Exception:
+        terminal_window_title = "Terminal"
+
+    shared_state["terminal_window_title"] = terminal_window_title
 
     command_queue = queue.Queue()
 
@@ -38,11 +47,10 @@ def run():
     )
     game_service.initialize_world()
 
-    # --- NEW: Get camera speed from config ---
     camera_move_increment = config.get("controls", "camera_move_increment")
 
     try:
-        # Initial render before starting loops
+        # Initial render
         render_data = game_service.get_render_data()
         with shared_state["lock"]:
             clamped_x, clamped_y = display(
@@ -51,19 +59,28 @@ def run():
             shared_state["camera_x"] = clamped_x
             shared_state["camera_y"] = clamped_y
 
-        # Start the input handler in a separate thread
+        # Start input handler
         input_thread = threading.Thread(
             target=input_handler, args=(command_queue, shared_state), daemon=True
         )
         input_thread.start()
 
-        # --- MODIFIED: Start the main game loop, passing new config value ---
-        # Note: The nb_input_for_cleanup argument is removed
+        # Start game loop
         game_loop(game_service, command_queue, shared_state, camera_move_increment)
 
     except (KeyboardInterrupt, SystemExit):
         print("\nGame interrupted by user. Exiting.")
     finally:
-        # No terminal restoration is needed as 'keyboard' lib handles it
-        # or doesn't interfere in the same way.
+        try:
+            import termios
+
+            termios.tcflush(sys.stdin, termios.TCIFLUSH)
+        except ImportError:
+            try:
+                import msvcrt
+
+                while msvcrt.kbhit():
+                    msvcrt.getch()
+            except ImportError:
+                pass
         os._exit(0)

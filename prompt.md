@@ -1,4 +1,4 @@
-### **New Start Prompt** v0.4
+### **New Start Prompt** v0.5
 
 Hello! Your task is to continue the development of a Python command-line simulation game. The project follows Domain-Driven Design (DDD), Test-Driven Development (TDD), and Clean Architecture principles.
 
@@ -27,44 +27,45 @@ Hello! Your task is to continue the development of a Python command-line simulat
 - `presentation/`: **Presentation Layer.** Responsible for all user-facing logic (rendering, input).
   - `__init__.py`: Marks as a package.
   - `main.py`: Orchestrates the CLI application. Initializes services, the `shared_state` dictionary (including `keys_down`), and threads, and handles application startup/teardown.
-  - `input_handler.py`: Uses the `keyboard` library's event hooks (`on_press`/`on_release`) to manage user input. For movement keys (`w,a,s,d`), it updates a `keys_down` dictionary in `shared_state`. For all other keys, it manages the text input buffer or places commands on the `command_queue`.
-  - `renderer.py`: Contains the `display` function responsible for drawing the entire game state to the terminal.
-  - `game_loop.py`: Contains the primary `game_loop`. On every frame, it reads the `shared_state['keys_down']` for smooth camera movement. It also drains the `command_queue` for game logic commands and controls the timed game tick, cleanly separating UI updates from logic updates.
+  - `input_handler.py`: Uses the `keyboard` library's event hooks to manage user input. It updates a `keys_down` dictionary for smooth camera movement and places commands (like hotkeys) on the `command_queue`. It now recognizes the 'f' key to dispatch a `__TOGGLE_FLOW_FIELD__` command.
+  - `renderer.py`: Contains the `display` function responsible for drawing the entire game state to the terminal. Now includes logic to conditionally render the `food_flow_field` as a grid of arrows for debugging purposes.
+  - `game_loop.py`: Contains the primary `game_loop`. It handles smooth camera movement, drains the `command_queue` for logic commands, and controls the timed game tick. It processes the `__TOGGLE_FLOW_FIELD__` command by calling the appropriate service method.
 - `application/`: **Application Layer.**
   - `__init__.py`: Marks as a package.
   - `config.py`: Singleton for loading `config.json`.
-  - `game_service.py`: Exposes application use cases (e.g., `toggle_pause`, `speed_up`, `execute_user_command`). It orchestrates the domain layer by interacting with the `World` facade.
+  - `game_service.py`: Exposes application use cases (e.g., `toggle_pause`, `speed_up`). It orchestrates the domain layer and now manages the state for debug visualizations (e.g., `toggle_flow_field_visibility`).
 - `domain/`: **Domain Layer.**
   - `__init__.py`: Marks as a package.
   - `object_pool.py`: Contains the generic `ObjectPool` and `PooledObjectMixin`.
   - `entity.py`: Base `Entity` class, inheriting from `PooledObjectMixin`.
   - `tile.py`: Defines the `Tile` class and the `TILES` dictionary (Land, Water, Mountain).
-  - `pathfinder.py`: Contains the A\* pathfinding logic, now used by `Human` entities for non-food-related wandering.
-  - `flow_field_manager.py`: **(New)** A domain service that uses Breadth-First Search (BFS) to generate a vector field (flow field) pointing towards goals (e.g., food).
+  - `pathfinder.py`: Contains the A\* pathfinding logic, used by `Human` entities for non-food-related wandering.
+  - `flow_field_manager.py`: A domain service that uses Breadth-First Search (BFS) to generate a vector field (flow field) pointing towards goals.
   - `entity_manager.py`: Manages entity lifecycle: object pools, creation (`create_human`), storage (`entities` list), and cleanup.
   - `spawning_manager.py`: Manages all rules for entity spawning: natural rice spawning, reproduction placement, and the replanting queue.
-  - `human.py`: Logic for the `Human` entity. Implements a **hybrid movement model**, switching between following the `World`'s flow field when hungry and using the `Pathfinder` to generate its own `path` for wandering when sated.
-  - `rice.py`: Logic for the `Rice` entity. Implements a `get_eaten()` method.
-  - `world.py`: Acts as the central **coordinator/facade** for the domain. It holds the map `grid` and orchestrates the `game_tick`, delegating tasks to its managers. It now owns the `FlowFieldManager` and is responsible for periodically regenerating the `food_flow_field`.
+  - `human.py`: Logic for the `Human` entity. Implements a hybrid movement model, switching between following the `World`'s flow field and using A\* for wandering.
+  - `rice.py`: Logic for the `Rice` entity, including a `get_eaten()` method.
+  - `world.py`: Acts as the central **coordinator/facade** for the domain. It holds the map `grid` and orchestrates the `game_tick`, delegating tasks to its managers and periodically regenerating the `food_flow_field`.
 - `tests/`: **Testing Layer.**
   - `__init__.py`: Marks as a package.
   - `conftest.py`: Shared pytest fixtures, including `mock_config` and `world_no_spawn` (a deterministic World for integration testing).
   - `test_object_pool.py`: Unit tests for the `ObjectPool`.
   - `test_pathfinder.py`: Unit tests for the `Pathfinder` class.
-  - `test_flow_field_manager.py`: **(New)** Unit tests for the `FlowFieldManager`, verifying correct vector generation.
-  - `test_entity_manager.py`: Unit tests for `EntityManager`, including pooling and finding entities.
-  - `test_spawning_manager.py`: Unit tests for `SpawningManager` rules and replanting.
-  - `test_human_logic.py`: Unit tests for `Human` logic, using a `MockWorld` that can provide a mock flow field to test the new hybrid movement logic.
+  - `test_flow_field_manager.py`: Unit tests for the `FlowFieldManager`.
+  - `test_entity_manager.py`: Unit tests for `EntityManager`.
+  - `test_spawning_manager.py`: Unit tests for `SpawningManager`.
+  - `test_human_logic.py`: Unit tests for `Human` logic, using a `MockWorld`.
   - `test_rice_logic.py`: Unit tests for `Rice` logic.
-  - `test_world_logic.py`: High-level integration tests for the `World`'s orchestration logic. (This file might be merged or deprecated in favor of `test_domain_integration`).
-  - `test_domain_integration.py`: **Crucial** mid-level integration tests that verify collaboration between domain components, now including tests for the `World`'s flow field generation and the `Human`'s correct interaction with it.
+  - `test_game_service.py`: **(New)** Unit tests for the `GameService`, ensuring application use cases like state toggles work correctly.
+  - `test_world_logic.py`: Legacy integration tests. (To be reviewed/merged).
+  - `test_domain_integration.py`: Crucial integration tests verifying collaboration between domain components.
 
 **Recent Accomplishments & Key Learnings:**
 
-1.  **Implemented a Scalable Flow Field System:** We replaced inefficient, per-entity A\* pathfinding for food with a centralized flow field system. The new `FlowFieldManager` generates a single, efficient vector field from all food sources, which hungry entities can follow. This solves the "thundering herd" performance bottleneck.
-2.  **Developed a Hybrid AI Model:** We evolved the `Human`'s AI from a simple model to a more sophisticated hybrid one. It now intelligently switches between two behaviors: following the flow field when hungry and using its own A\* path for wandering when sated. This provides both performance and behavioral richness.
-3.  **Strict TDD Process Proved Effective:** The development was rigorously driven by tests. This process was instrumental in discovering and fixing several subtle bugs in the implementation, test logic, and entity lifecycle interactions, leading to a much more robust final product.
-4.  **Maintained Architectural Discipline:** We successfully introduced a new domain service while adhering to our architectural principles. We also consciously deferred a potential optimization (a Quadtree for proximity checks) to avoid scope creep, demonstrating a pragmatic approach to managing technical debt.
+1.  **Implemented Flow Field Visualization:** To address a bug with AI movement, we added a toggleable debug view (`'f'` key) that renders the `food_flow_field` directly on the map. This provides immediate visual feedback on the AI's pathfinding data.
+2.  **Reinforced Architectural Principles:** The visualization feature was implemented without compromising Clean Architecture. The toggle state (`_show_flow_field`) lives in the `GameService` (Application), and rendering logic is confined to the `Renderer` (Presentation). The `Domain` layer remains completely unaware of any visualization concerns, demonstrating the strength of our separated architecture.
+3.  **Expanded TDD to the Application Layer:** We created `test_game_service.py` to drive the implementation of the toggle feature. This successfully validated the state management logic within the `GameService` before we even wrote the rendering code, proving the value of TDD for non-domain-logic layers.
+4.  **Embraced the Power of Debug Tools:** This task highlighted that for complex simulations, building internal visualization tools is not just a "nice-to-have" but a critical component for effective debugging and understanding emergent behavior.
 
 **IMPORTANT: Our Interaction Model**
 **Development Workflow:**
