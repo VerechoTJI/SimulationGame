@@ -214,18 +214,28 @@ def display(
         )
     else:
         # --- 1. Define Layout ---
-        # The main view gets all vertical space not used by the header or the footer.
-        # The footer's height is dynamic, based on terminal size.
-        footer_total_height = terminal_height // 4  # Let footer take 25% of the screen
+        # Terminal Height =
+        # Header +
+        # Main view +
+        # Footer(>= FOOTER_SEPARATOR_HEIGHT + FOOTER_LOG_HEADER_HEIGHT + FOOTER_CONTROLS_HEIGHT + 1)
+        # Terminal Height - Header - min(Footer) - Main view (actual) = free space
+        # Footer += free space
         footer_total_height = max(
-            footer_total_height,
+            terminal_height // 4,
             FOOTER_SEPARATOR_HEIGHT
             + FOOTER_LOG_HEADER_HEIGHT
             + FOOTER_CONTROLS_HEIGHT
             + 1,
-        )  # Ensure footer has minimum space for 1 log line.
+        )
+        # Ensure footer has minimum space for 1 log line.
 
+        # Reassign free space to footer
         main_view_height = terminal_height - HEADER_HEIGHT - footer_total_height
+        free_space = main_view_height - len(render_data["display_grid"])
+
+        if free_space > 0:
+            main_view_height -= free_space
+            footer_total_height += free_space
 
         # --- 2. Render Components ---
         main_view_lines, clamped_camera_x, clamped_camera_y = _render_main_view(
