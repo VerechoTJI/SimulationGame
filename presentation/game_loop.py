@@ -23,8 +23,8 @@ def game_loop(
 
     # Local camera state for smooth movement
     with shared_state["lock"]:
-        camera_x = shared_state["camera_x"]
         camera_y = shared_state["camera_y"]
+        camera_x = shared_state["camera_x"]
 
     try:
         while True:
@@ -104,8 +104,8 @@ def game_loop(
 
             camera_x, camera_y = clamped_x, clamped_y
             with shared_state["lock"]:
-                shared_state["camera_x"] = camera_x
                 shared_state["camera_y"] = camera_y
+                shared_state["camera_x"] = camera_x
             sleep_time = max(0, 0.00833 - time.time() + current_time)
             time.sleep(sleep_time)
 
