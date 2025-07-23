@@ -161,3 +161,40 @@ class TestFlowFieldManager:
         assert np.isclose(
             cost_field[2, 2], sqrt_2
         ), f"Diagonal cost should be ~{sqrt_2}"
+
+    def test_generate_flow_field_with_tile_costs(self):
+        """
+        Tests that the flow field correctly chooses a cheaper path with
+        low-cost tiles over a shorter path with high-cost tiles.
+        Grid:
+            L L L
+            L M G   (G=Goal at (1,2), M=Mountain at (1,1))
+            L L L
+        The vector at (1,0) should point diagonally to (0,1) or (2,1)
+        to go around the mountain, not directly into it.
+        """
+        # ARRANGE
+        grid = [
+            [TILES["land"], TILES["land"], TILES["land"]],
+            [TILES["land"], TILES["mountain"], TILES["land"]],
+            [TILES["land"], TILES["land"], TILES["land"]],
+        ]
+        manager = FlowFieldManager(grid)
+        goal_pos = [(1, 2)]
+
+        # ACT
+        flow_field = manager.generate_flow_field(goal_pos)
+
+        # ASSERT
+        # The current (incorrect) implementation will point from (1,0)
+        # straight to (1,1). Vector (0, 1).
+        # The correct implementation will find it cheaper to go around,
+        # pointing to (0,1) or (2,1). Vector (-1, 1) or (1, 1).
+        vector_at_1_0 = flow_field[1, 0]
+        is_correct_vector = np.array_equal(vector_at_1_0, [-1, 1]) or np.array_equal(
+            vector_at_1_0, [1, 1]
+        )
+        assert is_correct_vector, (
+            f"Vector at (1,0) should be [-1, 1] or [1, 1] (detour), "
+            f"but was {vector_at_1_0}"
+        )

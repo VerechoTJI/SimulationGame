@@ -1,6 +1,6 @@
 # domain/flow_field_manager.py
 import numpy as np
-from collections import deque
+from queue import PriorityQueue
 import math
 
 
@@ -30,7 +30,8 @@ class FlowFieldManager:
         self, goal_positions_yx: list[tuple[int, int]], return_cost_field=False
     ):
         """
-        Generates a flow field pointing towards the nearest goal positions.
+        Generates a flow field pointing towards the nearest goal positions
+        using Dijkstra's algorithm to account for tile costs.
 
         Args:
             goal_positions_yx: A list of (y, x) tuples representing the goals.
@@ -42,32 +43,41 @@ class FlowFieldManager:
         if not goal_positions_yx:
             return (flow_field, cost_field) if return_cost_field else flow_field
 
-        queue = deque()
+        pq = PriorityQueue()
         for y, x in goal_positions_yx:
             if 0 <= y < self.height and 0 <= x < self.width:
-                if self.grid[y][x].tile_move_speed_factor > 0:
+                tile = self.grid[y][x]
+                if tile.tile_move_speed_factor > 0:
                     cost_field[y, x] = 0
-                    queue.append((y, x))
+                    pq.put((0, (y, x)))
 
-        while queue:
-            y, x = queue.popleft()
-            current_cost = cost_field[y, x]
+        while not pq.empty():
+            current_cost, (y, x) = pq.get()
+
+            # If we've found a cheaper path already, skip
+            if current_cost > cost_field[y, x]:
+                continue
 
             for dy, dx in self.NEIGHBORS:
                 ny, nx = y + dy, x + dx
 
                 if 0 <= ny < self.height and 0 <= nx < self.width:
-                    if self.grid[ny][nx].tile_move_speed_factor > 0 and np.isinf(
-                        cost_field[ny, nx]
-                    ):
+                    neighbor_tile = self.grid[ny][nx]
+                    if neighbor_tile.tile_move_speed_factor > 0:
+                        # Cost is inversely proportional to speed factor
+                        tile_cost = 1.0 / neighbor_tile.tile_move_speed_factor
                         move_cost = (
                             self.DIAGONAL_COST
                             if dx != 0 and dy != 0
                             else self.CARDINAL_COST
                         )
-                        cost_field[ny, nx] = current_cost + move_cost
-                        queue.append((ny, nx))
+                        new_cost = current_cost + (move_cost * tile_cost)
 
+                        if new_cost < cost_field[ny, nx]:
+                            cost_field[ny, nx] = new_cost
+                            pq.put((new_cost, (ny, nx)))
+
+        # Vector field generation remains the same
         for y in range(self.height):
             for x in range(self.width):
                 if np.isinf(cost_field[y, x]):
