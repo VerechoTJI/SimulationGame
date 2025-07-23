@@ -13,8 +13,8 @@ def mock_config():
     """Provides a session-wide mock configuration dictionary with the new structure."""
     return {
         "simulation": {
-            "grid_width": 10,
             "grid_height": 10,
+            "grid_width": 10,
             "tile_size_meters": 10,
             # Add map_seed to base config for consistency
             "map_seed": 12345,
@@ -44,9 +44,6 @@ def mock_config():
             },
         },
     }
-
-
-# ... (human_config, rice_config, human, rice_plant fixtures are unchanged) ...
 
 
 @pytest.fixture
@@ -80,15 +77,15 @@ def world_factory(mock_config):
     This is more flexible than a static fixture.
     """
 
-    def _create_world(width=None, height=None, custom_config=None):
+    def _create_world(height=None, width=None, custom_config=None):
         config_to_use = custom_config if custom_config else mock_config
         sim_config = config_to_use["simulation"]
-        final_width = width if width is not None else sim_config["grid_width"]
         final_height = height if height is not None else sim_config["grid_height"]
+        final_width = width if width is not None else sim_config["grid_width"]
 
         world = World(
-            width=final_width,
             height=final_height,
+            width=final_width,
             tile_size=sim_config["tile_size_meters"],
             config_data=config_to_use,
         )

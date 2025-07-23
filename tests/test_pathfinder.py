@@ -7,10 +7,11 @@ from domain.tile import Tile, TILES
 
 # A simple, deterministic grid for testing pathfinding.
 # L = Land, W = Water (impassable)
-# Grid:
-# L L L
-# L W L
-# L L L
+# Grid layout:
+# L L L  (y=0)
+# L W L  (y=1)
+# L L L  (y=2)
+# x=0 x=1 x=2
 @pytest.fixture
 def test_grid():
     """Provides a simple 3x3 grid with a water obstacle."""
@@ -29,21 +30,23 @@ def pathfinder(test_grid):
 
 
 def test_pathfinder_direct_path(pathfinder):
-    """Tests a straight path with no obstacles."""
-    path = pathfinder.find_path(start_pos=(0, 0), end_pos=(2, 0))
+    """Tests a straight path with no obstacles using (y, x) coords."""
+    # From (y=0, x=0) to (y=0, x=2)
+    path = pathfinder.find_path(start_pos_yx=(0, 0), end_pos_yx=(0, 2))
     assert path is not None
-    assert path == [(1, 0), (2, 0)]
+    assert path == [(0, 1), (0, 2)]
 
 
 def test_pathfinder_around_obstacle(pathfinder):
-    """Tests if the path correctly navigates around the water tile."""
-    # Path from top-left to bottom-right must go around the water at (1, 1)
-    path = pathfinder.find_path(start_pos=(0, 0), end_pos=(2, 2))
+    """Tests if the path correctly navigates around the water tile at (1, 1)."""
+    # Path from top-left (0,0) to bottom-right (2,2) must go around water at (1,1)
+    path = pathfinder.find_path(start_pos_yx=(0, 0), end_pos_yx=(2, 2))
     assert path is not None
-    # One possible correct path. Note: (1,0) -> (2,1) -> (2,2) is also valid.
-    # We check for length and valid moves.
-    assert len(path) > 2  # It must be longer than a direct path
-    assert (1, 1) not in path  # Must not go through water
+    # Check that the path is valid and avoids the obstacle
+    assert (
+        len(path) > 2
+    )  # It must be longer than a direct diagonal path if it were clear
+    assert (1, 1) not in path, "Path must not go through water at (1, 1)"
 
 
 def test_pathfinder_no_path_exists(pathfinder):
@@ -55,17 +58,18 @@ def test_pathfinder_no_path_exists(pathfinder):
         [TILES["land"], TILES["water"], TILES["land"]],
     ]
     pathfinder_isolated = Pathfinder(grid)
-    path = pathfinder_isolated.find_path(start_pos=(0, 0), end_pos=(2, 1))
+    # Start at (y=0, x=0), end at (y=1, x=2) which is isolated
+    path = pathfinder_isolated.find_path(start_pos_yx=(0, 0), end_pos_yx=(1, 2))
     assert path is None
 
 
 def test_pathfinder_start_equals_end(pathfinder):
     """Tests if starting and ending at the same spot returns an empty path."""
-    path = pathfinder.find_path(start_pos=(0, 0), end_pos=(0, 0))
-    assert path == []  # An empty list is the correct response
+    path = pathfinder.find_path(start_pos_yx=(0, 0), end_pos_yx=(0, 0))
+    assert path == []
 
 
 def test_pathfinder_start_on_impassable_tile(pathfinder):
-    """Tests starting on an unwalkable tile (should find no path)."""
-    path = pathfinder.find_path(start_pos=(1, 1), end_pos=(2, 2))
+    """Tests starting on an unwalkable tile (y=1, x=1) should find no path."""
+    path = pathfinder.find_path(start_pos_yx=(1, 1), end_pos_yx=(2, 2))
     assert path is None

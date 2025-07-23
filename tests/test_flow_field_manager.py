@@ -2,6 +2,7 @@
 
 import pytest
 import numpy as np
+import math
 from domain.flow_field_manager import FlowFieldManager
 from domain.tile import TILES
 
@@ -39,21 +40,19 @@ class TestFlowFieldManager:
         # ACT
         flow_field = flow_manager.generate_flow_field(goal_pos)
 
-        # ASSERT (CORRECTED)
+        # ASSERT
         # Check vectors to ensure they point towards the goal, navigating the obstacle.
-        # Vector format is (dy, dx).
-
-        # The shortest path from (0,0) is South, not South-East into water.
+        # Vector format is (dy, dx). With new costs, shortest path logic holds.
         assert np.array_equal(
             flow_field[0, 0], [1, 0]
         ), "From (0,0) should be S (dy=1, dx=0)"
-
-        # From (0,2), the path goes East towards the gap at (1,2)
+        assert np.array_equal(
+            flow_field[1, 0], [1, 1]
+        ), "From (0,0) should be SE (dy=1, dx=1)"
         assert np.array_equal(
             flow_field[2, 0], [0, 1]
-        ), "From (0,2) should be E (dy=0, dx=1)"
+        ), "From (2,0) should be E (dy=0, dx=1)"
 
-        # From (4,4), the path is West towards (4,3) etc.
         assert np.array_equal(
             flow_field[4, 4], [0, -1]
         ), "From (4,4) should be W (dy=0, dx=-1)"
@@ -79,12 +78,10 @@ class TestFlowFieldManager:
         flow_field = flow_manager.generate_flow_field(goal_pos)
 
         # ASSERT
-        # An empty goal list should result in a field of all (0,0) vectors.
         assert np.all(flow_field == 0)
 
     def test_unreachable_area_has_zero_vector(self):
         # ARRANGE
-        # A grid where the goal is walled off.
         grid = [
             [TILES["land"], TILES["water"], TILES["land"]],
             [TILES["land"], TILES["water"], TILES["land"]],
@@ -97,52 +94,70 @@ class TestFlowFieldManager:
         flow_field = manager.generate_flow_field(goal_pos)
 
         # ASSERT
-        # The entire left side should be zero vectors because it can't reach the goal.
         assert np.array_equal(flow_field[0, 0], [0, 0])
         assert np.array_equal(flow_field[1, 0], [0, 0])
         assert np.array_equal(flow_field[2, 0], [0, 0])
-
-        # The reachable side should have non-zero vectors (except the goal itself).
-        assert np.array_equal(flow_field[0, 2], [1, 0])  # South (dy=1, dx=0)
-        assert np.array_equal(flow_field[1, 2], [0, 0])  # The goal
-        assert np.array_equal(flow_field[2, 2], [-1, 0])  # North (dy=-1, dx=0)
+        assert np.array_equal(flow_field[0, 2], [1, 0])
+        assert np.array_equal(flow_field[1, 2], [0, 0])
+        assert np.array_equal(flow_field[2, 2], [-1, 0])
 
     def test_field_generation_multiple_goals(self, flow_manager):
         """
         Tests that the flow field correctly points to the NEAREST of two goals.
         """
         # ARRANGE
-        # Goal A is at (0, 4) (top right)
-        # Goal B is at (4, 0) (bottom left)
-        goal_positions = [(0, 4), (4, 0)]
+        goal_positions = [(0, 4), (4, 0)]  # Goal A (top-right), Goal B (bottom-left)
 
         # ACT
         flow_field = flow_manager.generate_flow_field(goal_positions)
 
         # ASSERT
-        # The vector at (y, x) is (dy, dx)
-
-        # Tiles near Goal A should point towards it.
-        # (0, 3) is directly to the left of Goal A. Vector should be East (0, 1).
         assert np.array_equal(flow_field[0, 3], [0, 1]), "Should point East to Goal A"
-        # (1, 4) is directly below Goal A. Vector should be North (-1, 0).
         assert np.array_equal(flow_field[1, 4], [-1, 0]), "Should point North to Goal A"
-
-        # Tiles near Goal B should point towards it.
-        # (4, 1) is directly to the right of Goal B. Vector should be West (0, -1).
         assert np.array_equal(flow_field[4, 1], [0, -1]), "Should point West to Goal B"
-        # (3, 0) is directly above Goal B. Vector should be South (1, 0).
         assert np.array_equal(flow_field[3, 0], [1, 0]), "Should point South to Goal B"
 
-        # Tiles from the obstacle near Goal A should point towards it.
-        assert np.array_equal(flow_field[2, 2], [0, -1]), "Should point East to Goal A"
+        # (2,2) is closer to Goal B, path starts by going West.
+        assert np.array_equal(
+            flow_field[2, 2], [0, -1]
+        ), "Should point West towards path to Goal B"
 
-        # A tile equidistant from the obstacle-free path to both goals should pick one.
-        # e.g. (0,0) is closer to Goal B (4,0)
+        # (0,0) is equidistant step-wise, but closer to B (4,0) via diagonal path
         assert np.array_equal(
             flow_field[0, 0], [1, 0]
         ), "From (0,0) closer path is to Goal B"
 
-        # The goals themselves have zero vectors
         assert np.array_equal(flow_field[0, 4], [0, 0]), "Goal A vector should be zero"
         assert np.array_equal(flow_field[4, 0], [0, 0]), "Goal B vector should be zero"
+
+    def test_differentiated_cardinal_diagonal_cost(self):
+        """
+        Tests that the cost field correctly assigns a higher cost to
+        diagonal movement (~1.414) than to cardinal movement (1.0).
+        This is the core fix for preventing flow field spirals on plateaus.
+        """
+        # ARRANGE
+        grid = [[TILES["land"]] * 3 for _ in range(3)]
+        manager = FlowFieldManager(grid)
+        goal_pos = [(1, 1)]  # Center goal
+
+        # ACT
+        # Call the method requesting the cost_field for testing purposes.
+        _, cost_field = manager.generate_flow_field(goal_pos, return_cost_field=True)
+
+        # ASSERT
+        # The goal itself has zero cost
+        assert cost_field[1, 1] == 0, "Cost at the goal should be 0"
+
+        # Cardinal neighbors (straight line) should have a cost of 1.0
+        assert np.isclose(cost_field[1, 0], 1.0), "Cardinal cost should be 1.0"
+        assert np.isclose(cost_field[0, 1], 1.0), "Cardinal cost should be 1.0"
+
+        # Diagonal neighbors should have a cost of sqrt(2)
+        sqrt_2 = math.sqrt(2)
+        assert np.isclose(
+            cost_field[0, 0], sqrt_2
+        ), f"Diagonal cost should be ~{sqrt_2}"
+        assert np.isclose(
+            cost_field[2, 2], sqrt_2
+        ), f"Diagonal cost should be ~{sqrt_2}"

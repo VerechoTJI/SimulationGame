@@ -37,13 +37,17 @@ class EntityManager:
         except (KeyError, TypeError):
             return default
 
-    def create_human(self, x: int, y: int, initial_saturation: int = None) -> Human:
-        """Creates a Human at a grid location, adding it to the entity list."""
-        pos_x = (x + 0.5) * self.tile_size_meters
-        pos_y = (y + 0.5) * self.tile_size_meters
+    def create_human(
+        self, pos_y: int, pos_x: int, initial_saturation: int = None
+    ) -> Human:
+        """Creates a Human at a grid location (y, x), adding it to the entity list."""
+        world_pos_x = (pos_x + 0.5) * self.tile_size_meters
+        world_pos_y = (pos_y + 0.5) * self.tile_size_meters
 
         human_attrs = self._get_config("entities", "human", "attributes")
-        human = self._human_pool.get(pos_x=pos_x, pos_y=pos_y, **human_attrs)
+        human = self._human_pool.get(
+            pos_y=world_pos_y, pos_x=world_pos_x, **human_attrs
+        )
 
         if initial_saturation is not None:
             human.saturation = initial_saturation
@@ -51,13 +55,13 @@ class EntityManager:
         self.entities.append(human)
         return human
 
-    def create_rice(self, x: int, y: int) -> Rice:
-        """Creates a Rice plant at a grid location, adding it to the entity list."""
-        pos_x = (x + 0.5) * self.tile_size_meters
-        pos_y = (y + 0.5) * self.tile_size_meters
+    def create_rice(self, pos_y: int, pos_x: int) -> Rice:
+        """Creates a Rice plant at a grid location (y, x), adding it to the entity list."""
+        world_pos_x = (pos_x + 0.5) * self.tile_size_meters
+        world_pos_y = (pos_y + 0.5) * self.tile_size_meters
 
         rice_attrs = self._get_config("entities", "rice", "attributes")
-        rice = self._rice_pool.get(pos_x=pos_x, pos_y=pos_y, **rice_attrs)
+        rice = self._rice_pool.get(pos_y=world_pos_y, pos_x=world_pos_x, **rice_attrs)
 
         self.entities.append(rice)
         return rice
@@ -77,7 +81,7 @@ class EntityManager:
 
         return removed_entities
 
-    def find_nearest_entity(self, origin_pos, entity_type, predicate=None):
+    def find_nearest_entity(self, origin_pos_yx, entity_type, predicate=None):
         """Finds the nearest entity of a given type that satisfies a predicate."""
         closest_entity = None
         min_dist_sq = float("inf")
@@ -86,7 +90,8 @@ class EntityManager:
             if isinstance(entity, entity_type):
                 if predicate and not predicate(entity):
                     continue
-                dist_sq = np.sum((entity.position - origin_pos) ** 2)
+                # entity.position and origin_pos_yx are both [y, x]
+                dist_sq = np.sum((entity.position - origin_pos_yx) ** 2)
                 if dist_sq < min_dist_sq:
                     min_dist_sq = dist_sq
                     closest_entity = entity
