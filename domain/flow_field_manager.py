@@ -26,6 +26,9 @@ class FlowFieldManager:
             (1, 1),  # Diagonals (NW, NE, SW, SE)
         ]
 
+    def _is_passable(self, y, x):
+        return self.grid[y][x].tile_move_speed_factor > 0
+
     def generate_flow_field(
         self, goal_positions_yx: list[tuple[int, int]], return_cost_field=False
     ):
@@ -46,36 +49,44 @@ class FlowFieldManager:
         pq = PriorityQueue()
         for y, x in goal_positions_yx:
             if 0 <= y < self.height and 0 <= x < self.width:
-                tile = self.grid[y][x]
-                if tile.tile_move_speed_factor > 0:
+                if self._is_passable(y, x):
                     cost_field[y, x] = 0
                     pq.put((0, (y, x)))
 
         while not pq.empty():
             current_cost, (y, x) = pq.get()
 
-            # If we've found a cheaper path already, skip
             if current_cost > cost_field[y, x]:
                 continue
 
             for dy, dx in self.NEIGHBORS:
                 ny, nx = y + dy, x + dx
 
-                if 0 <= ny < self.height and 0 <= nx < self.width:
-                    neighbor_tile = self.grid[ny][nx]
-                    if neighbor_tile.tile_move_speed_factor > 0:
-                        # Cost is inversely proportional to speed factor
-                        tile_cost = 1.0 / neighbor_tile.tile_move_speed_factor
-                        move_cost = (
-                            self.DIAGONAL_COST
-                            if dx != 0 and dy != 0
-                            else self.CARDINAL_COST
-                        )
-                        new_cost = current_cost + (move_cost * tile_cost)
+                if not (0 <= ny < self.height and 0 <= nx < self.width):
+                    continue
 
-                        if new_cost < cost_field[ny, nx]:
-                            cost_field[ny, nx] = new_cost
-                            pq.put((new_cost, (ny, nx)))
+                if self._is_passable(ny, nx):
+                    # --- START OF THE FIX ---
+                    # For diagonal movement, check if the corners are passable
+                    if dy != 0 and dx != 0:
+                        if not self._is_passable(y + dy, x) or not self._is_passable(
+                            y, x + dx
+                        ):
+                            continue
+                    # --- END OF THE FIX ---
+
+                    neighbor_tile = self.grid[ny][nx]
+                    tile_cost = 1.0 / neighbor_tile.tile_move_speed_factor
+                    move_cost = (
+                        self.DIAGONAL_COST
+                        if dx != 0 and dy != 0
+                        else self.CARDINAL_COST
+                    )
+                    new_cost = current_cost + (move_cost * tile_cost)
+
+                    if new_cost < cost_field[ny, nx]:
+                        cost_field[ny, nx] = new_cost
+                        pq.put((new_cost, (ny, nx)))
 
         # Vector field generation remains the same
         for y in range(self.height):
@@ -90,6 +101,13 @@ class FlowFieldManager:
                     ny, nx = y + dy, x + dx
 
                     if 0 <= ny < self.height and 0 <= nx < self.width:
+                        # --- START OF SECOND FIX (needed for vector calculation) ---
+                        if dy != 0 and dx != 0:
+                            if not self._is_passable(
+                                y + dy, x
+                            ) or not self._is_passable(y, x + dx):
+                                continue
+                        # --- END OF SECOND FIX ---
                         if cost_field[ny, nx] < min_cost:
                             min_cost = cost_field[ny, nx]
                             best_move = (dy, dx)

@@ -29,16 +29,19 @@ class Pathfinder:
         if start_node == end_node:
             return []
 
-        def get_move_cost(grid_pos_yx):
-            y, x = grid_pos_yx
-            tile = self.grid[y][x]  # Correct (y,x) access
-            if tile.tile_move_speed_factor == 0:
-                return float("inf")
-            return 1.0 / tile.tile_move_speed_factor
+        def get_tile(pos_yx):
+            y, x = pos_yx
+            return self.grid[y][x]
 
-        if get_move_cost(start_node) == float("inf") or get_move_cost(
-            end_node
-        ) == float("inf"):
+        def is_passable(pos_yx):
+            return get_tile(pos_yx).tile_move_speed_factor > 0
+
+        def get_move_cost(pos_yx):
+            if not is_passable(pos_yx):
+                return float("inf")
+            return 1.0 / get_tile(pos_yx).tile_move_speed_factor
+
+        if not is_passable(start_node) or not is_passable(end_node):
             return None
 
         open_set = []
@@ -61,25 +64,38 @@ class Pathfinder:
 
             current_y, current_x = current
 
-            for dy, dx in [
+            # Define potential neighbors
+            neighbors_to_check = [
                 (0, 1),
                 (0, -1),
                 (1, 0),
-                (-1, 0),
+                (-1, 0),  # Cardinals
                 (-1, -1),
                 (-1, 1),
                 (1, -1),
-                (1, 1),
-            ]:
+                (1, 1),  # Diagonals
+            ]
+
+            for dy, dx in neighbors_to_check:
                 neighbor_y, neighbor_x = current_y + dy, current_x + dx
                 neighbor = (neighbor_y, neighbor_x)
 
                 if not (0 <= neighbor_y < self.height and 0 <= neighbor_x < self.width):
                     continue
 
-                move_cost = get_move_cost(neighbor)
-                if move_cost == float("inf"):
+                if not is_passable(neighbor):
                     continue
+
+                # --- START OF THE FIX ---
+                # For diagonal movement, check if the corners are passable
+                if dy != 0 and dx != 0:
+                    corner1 = (current_y + dy, current_x)
+                    corner2 = (current_y, current_x + dx)
+                    if not is_passable(corner1) or not is_passable(corner2):
+                        continue
+                # --- END OF THE FIX ---
+
+                move_cost = get_move_cost(neighbor)
 
                 tentative_g_score = g_score[current] + (
                     move_cost * (1.414 if dx != 0 and dy != 0 else 1.0)
