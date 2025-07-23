@@ -2,6 +2,7 @@
 import sys
 import threading
 import keyboard
+import pygetwindow as gw
 
 # Define movement keys to avoid magic strings
 MOVEMENT_KEYS = {"w", "a", "s", "d"}
@@ -20,6 +21,8 @@ def input_handler(command_queue, shared_state):
             if event.name in MOVEMENT_KEYS:
                 with shared_state["lock"]:
                     shared_state["keys_down"][event.name] = False
+            return
+        if shared_state["terminal_window_title"] != gw.getActiveWindow().title:
             return
 
         # --- From here, we only handle KEY_DOWN events ---
@@ -91,9 +94,13 @@ def input_handler(command_queue, shared_state):
                 elif k == "-":
                     command_queue.put("__SPEED_DOWN__")
                     return
+                elif k == "f":  # <-- NEW HOTKEY
+                    command_queue.put("__TOGGLE_FLOW_FIELD__")
+                    return
                 # State-based movement keys
                 if key_name in MOVEMENT_KEYS:
                     shared_state["keys_down"][key_name] = True
+                    return
                     return
 
             # --- Priority 3: If no hotkey was pressed, start text entry ---
@@ -104,7 +111,7 @@ def input_handler(command_queue, shared_state):
                 shared_state["cursor_pos"] = cursor + 1
 
     # Hook the event handler
-    hook = keyboard.hook(handle_key_event, suppress=True)
+    hook = keyboard.hook(handle_key_event)
 
     # Keep the thread alive. The main thread will exit this daemon thread.
     while not stop_event.is_set():

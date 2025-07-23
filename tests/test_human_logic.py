@@ -1,4 +1,3 @@
-# tests/test_human_logic.py
 import pytest
 import numpy as np
 
@@ -11,6 +10,8 @@ class MockEntityManager:
     def __init__(self):
         self.entities = []
 
+    # This method is no longer directly used by the Human's main logic but is
+    # kept for other potential tests or if the eating logic gets more complex.
     def find_nearest_entity(self, origin_pos, entity_type, predicate=None):
         closest_entity = None
         min_dist_sq = float("inf")
@@ -22,7 +23,7 @@ class MockEntityManager:
         return closest_entity
 
 
-# --- REFACTORED MockWorld ---
+# --- REFACTORED MockWorld with Flow Field Support ---
 class MockWorld:
     def __init__(self, config):
         self.config = config
@@ -38,8 +39,10 @@ class MockWorld:
             for _ in range(self.height)
         ]
         self.logs = []
-        # --- FIX: MockWorld now has a mock entity_manager ---
         self.entity_manager = MockEntityManager()
+
+        # --- NEW: Add mock flow field support ---
+        self.food_flow_field = np.zeros((self.height, self.width, 2), dtype=np.int8)
 
     def add_log(self, message):
         self.logs.append(message)
@@ -55,7 +58,13 @@ class MockWorld:
         return (grid_x, grid_y)
 
     def find_path(self, start_pos, end_pos):
-        return [end_pos] if start_pos != end_pos else []
+        # Return a predictable path for testing wandering
+        return [(1, 1), (2, 2)] if start_pos != end_pos else []
+
+    # --- NEW: Mock method for Human to call ---
+    def get_flow_vector_at_position(self, world_position):
+        grid_x, grid_y = self.get_grid_position(world_position)
+        return self.food_flow_field[grid_y, grid_x]
 
 
 @pytest.fixture
@@ -65,20 +74,18 @@ def mock_world_with_entities(mock_config):
 
 
 class TestHumanInternalState:
+    # This class remains unchanged as it tests core attributes
     def test_human_initializes_with_full_saturation(self, human):
         assert human.saturation == 100
 
     def test_human_loses_saturation_each_tick(self, human, mock_world_with_entities):
         initial_saturation = human.saturation
-        # --- FIX: The human's tick() logic now accesses world.entity_manager ---
-        # No change to the test code itself is needed, but the mock now supports it.
         human.tick(mock_world_with_entities)
         assert human.saturation == initial_saturation - 1
 
     def test_eating_replenishes_saturation_and_marks_rice_as_eaten(
         self, human, rice_plant
     ):
-        rice_plant.age = rice_plant.max_age
         human.saturation = 10
         initial_saturation = human.saturation
         assert rice_plant.is_eaten is False
@@ -88,27 +95,68 @@ class TestHumanInternalState:
 
 
 class TestHumanAI:
-    def test_hungry_human_finds_path_to_food(
-        self, human, mock_world_with_entities, rice_config
-    ):
-        human.saturation = 30
-        human.path = []
-        food = Rice(pos_x=85, pos_y=85, **rice_config)
-        food.age = food.max_age
-        # --- FIX: Add the food entity to the mock entity_manager ---
-        mock_world_with_entities.entity_manager.entities.append(food)
+    def test_hungry_human_moves_along_flow_field(self, human, mock_world_with_entities):
+        # ARRANGE
+        human.saturation = 30  # Make hungry
+        human.position = np.array([55.0, 55.0])  # Grid pos (5, 5)
+        initial_pos = human.position.copy()
 
+        # Set a flow vector pointing South-East (dy=1, dx=1) at the human's location
+        mock_world_with_entities.food_flow_field[5, 5] = np.array([1, 1])
+
+        # ACT
         human.tick(mock_world_with_entities)
-        assert human.path and human.path[-1] == (8, 8)
+
+        # ASSERT
+        assert not human.path, "A hungry human should not generate an A* path"
+        assert (
+            human.position[0] > initial_pos[0]
+        ), "Human should have moved in positive X direction"
+        assert (
+            human.position[1] > initial_pos[1]
+        ), "Human should have moved in positive Y direction"
+
+    def test_not_hungry_human_wanders_using_path(self, human, mock_world_with_entities):
+        # ARRANGE
+        human.saturation = 80  # Not hungry
+        assert not human.path
+
+        # ACT
+        human.tick(mock_world_with_entities)
+
+        # ASSERT
+        assert human.path, "A sated human should generate a path to wander"
+        # Check against the predictable path from our mock find_path
+        assert human.path == [(1, 1), (2, 2)]
+
+    def test_becoming_hungry_clears_wandering_path(
+        self, human, mock_world_with_entities
+    ):
+        # ARRANGE
+        human.saturation = 80  # Not hungry
+        human.position = np.array([55.0, 55.0])  # Grid pos (5, 5)
+        human.tick(mock_world_with_entities)  # Generates a wandering path
+        assert human.path, "Pre-condition: Human must have a wandering path"
+
+        # --- IMPROVEMENT: Simulate that food now exists by setting a flow vector ---
+        # This ensures the test is valid even when the flow isn't zero.
+        mock_world_with_entities.food_flow_field[5, 5] = np.array([1, 0])  # Point South
+
+        # ACT
+        human.saturation = 30  # Becomes hungry
+        human.tick(mock_world_with_entities)  # Tick again
+
+        # ASSERT
+        assert not human.path, "Becoming hungry should clear any existing path"
 
     def test_human_eats_when_next_to_food(
         self, human, mock_world_with_entities, rice_config
     ):
+        # This test remains valid as eating is checked before movement.
         human.saturation = 20
         human.position = np.array([55.0, 55.0])
         food = Rice(**rice_config, pos_x=56, pos_y=56)
         food.age = food.max_age
-        # --- FIX: Add the food entity to the mock entity_manager ---
         mock_world_with_entities.entity_manager.entities.append(food)
 
         assert food.is_eaten is False
@@ -121,8 +169,8 @@ class TestHumanAI:
         assert not human.path
 
 
+# TestHumanReproduction class remains unchanged
 class TestHumanReproduction:
-    # This whole class is unchanged as it only tests internal Human logic
     def test_can_reproduce_is_true_when_conditions_are_met(self, human):
         human.saturation = 95
         human.reproduction_cooldown = 0

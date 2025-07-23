@@ -10,6 +10,7 @@ class GameService:
     def __init__(self, grid_width, grid_height, tile_size):
         self.world = World(grid_width, grid_height, tile_size, config_data=config.data)
         self._is_paused = False
+        self._show_flow_field = False
         self._base_tick_seconds = config.get("simulation", "tick_seconds")
         self._tick_seconds = self._base_tick_seconds
         self._speed_adjust_factor = config.get("controls", "speed_adjust_factor")
@@ -20,20 +21,26 @@ class GameService:
         """Add initial welcome messages."""
         self.world.add_log("Welcome to the simulation!")
         self.world.add_log("The world has been generated.")
-        self.world.add_log("Use hotkeys to control: p=pause, n=next, +/-=speed")
+        self.world.add_log(
+            "Use hotkeys to control: p=pause, n=next,  +/-=speed, f=flow"
+        )
 
     def is_paused(self) -> bool:
-        """Public method to check if the simulation is paused."""
         return self._is_paused
 
     def toggle_pause(self):
-        """Toggles the paused state of the simulation."""
         self._is_paused = not self._is_paused
         status = "PAUSED" if self._is_paused else "RUNNING"
         self.world.add_log(f"Simulation {status}.")
 
+    def toggle_flow_field_visibility(self):
+        self._show_flow_field = not self._show_flow_field
+        status = "shown" if self._show_flow_field else "hidden"
+        self.world.add_log(
+            f"{Colors.BLUE}Flow field visualization {status}.{Colors.RESET}"
+        )
+
     def force_tick(self):
-        """Forces a single game tick, intended for use only when paused."""
         if self._is_paused:
             self.world.add_log("Advancing simulation by one tick.")
             self.world.game_tick()
@@ -43,30 +50,22 @@ class GameService:
             )
 
     def _adjust_speed(self, up=True):
-        """Private helper to adjust and clamp the simulation speed."""
         if up:
-            # To speed up, the time delay per tick must decrease
             self._tick_seconds /= self._speed_adjust_factor
         else:
-            # To slow down, the time delay per tick must increase
             self._tick_seconds *= self._speed_adjust_factor
-
-        # Clamp the value to the configured min/max
         self._tick_seconds = max(
             self._min_tick_seconds, min(self._max_tick_seconds, self._tick_seconds)
         )
-
         speed_multiplier = self._base_tick_seconds / self._tick_seconds
         self.world.add_log(
             f"Speed set to {speed_multiplier:.2f}x ({self._tick_seconds:.3f}s/tick)"
         )
 
     def speed_up(self):
-        """Increases the simulation speed."""
         self._adjust_speed(up=True)
 
     def speed_down(self):
-        """Decreases the simulation speed."""
         self._adjust_speed(up=False)
 
     def execute_user_command(self, command_text: str):
@@ -76,11 +75,13 @@ class GameService:
             return
 
         try:
+            # User command is "sp <type> <x> <y>"
             if len(parts) == 4 and parts[0].lower() == "sp":
                 entity_type = parts[1]
                 x = int(parts[2])
                 y = int(parts[3])
-                self.world.spawn_entity(entity_type, x, y)
+                # --- FIX: Call world.spawn_entity with (y, x) order ---
+                self.world.spawn_entity(entity_type, y, x)
             else:
                 self.world.add_log(
                     f"{Colors.RED}Unknown command: '{command_text}'{Colors.RESET}"
@@ -91,10 +92,6 @@ class GameService:
             )
 
     def tick(self):
-        """
-        Advances the simulation by one tick, but only if not paused.
-        This is called by the main game loop on a timer.
-        """
         if self._is_paused:
             return
         self.world.game_tick()
@@ -109,8 +106,9 @@ class GameService:
 
         human_statuses = []
         for entity in self.world.entity_manager.entities:
-            grid_x = int(entity.position[0] / self.world.tile_size_meters)
-            grid_y = int(entity.position[1] / self.world.tile_size_meters)
+            # --- FIX: entity.position is [y, x], so calculate grid coords correctly ---
+            grid_y = int(entity.position[0] / self.world.tile_size_meters)
+            grid_x = int(entity.position[1] / self.world.tile_size_meters)
 
             if 0 <= grid_y < self.world.height and 0 <= grid_x < self.world.width:
                 if isinstance(entity, Human):
@@ -125,7 +123,7 @@ class GameService:
                     color = Colors.WHITE
                 display_grid[grid_y][grid_x] = color + entity.symbol
 
-        return {
+        render_payload = {
             "display_grid": display_grid,
             "width": self.world.width,
             "tick": self.world.tick_count,
@@ -136,4 +134,8 @@ class GameService:
             "is_paused": self._is_paused,
             "tick_seconds": self._tick_seconds,
             "base_tick_seconds": self._base_tick_seconds,
+            "show_flow_field": self._show_flow_field,
         }
+        if self._show_flow_field:
+            render_payload["flow_field_data"] = self.world.food_flow_field
+        return render_payload

@@ -2,14 +2,9 @@
 import pytest
 import numpy as np
 
-# The 'copy' import is no longer needed here
-# import copy
-
 from domain.human import Human
 
 
-# The 'world_no_spawn' fixture has been moved to conftest.py
-# The 'world_instance' fixture is only used here, so it can stay.
 @pytest.fixture
 def world_instance(world_factory):
     """Provides a real, but blank, World instance."""
@@ -23,8 +18,8 @@ class TestWorldReproduction:
         # ARRANGE
         world = world_no_spawn
 
-        # Use the entity manager to create the parent
-        parent = world.entity_manager.create_human(x=5, y=5)
+        # Use the entity manager with (y, x) to create the parent
+        parent = world.entity_manager.create_human(pos_y=5, pos_x=5)
         # Manually set state for reproduction
         parent.saturation = 100
         parent.reproduction_cooldown = 0
@@ -41,7 +36,6 @@ class TestWorldReproduction:
         all_humans = [e for e in entities if isinstance(e, Human)]
         assert len(all_humans) == 2
 
-        # Retrieve entities from the manager list
         new_parent_state = next(p for p in all_humans if p.id == parent.id)
         newborn = next(n for n in all_humans if n.id != parent.id)
 
@@ -56,10 +50,13 @@ class TestWorldReproduction:
         assert newborn.saturation == human_config["newborn_saturation_endowment"]
 
         # Check newborn's position
-        parent_grid_pos = world.get_grid_position(parent.position)
-        newborn_grid_pos = world.get_grid_position(newborn.position)
-        dx = abs(parent_grid_pos[0] - newborn_grid_pos[0])
-        dy = abs(parent_grid_pos[1] - newborn_grid_pos[1])
+        parent_grid_pos = world.get_grid_position(parent.position)  # Returns (y, x)
+        newborn_grid_pos = world.get_grid_position(newborn.position)  # Returns (y, x)
+
+        # Correctly calculate dy and dx from the (y, x) tuples
+        dy = abs(parent_grid_pos[0] - newborn_grid_pos[0])  # Difference in Y
+        dx = abs(parent_grid_pos[1] - newborn_grid_pos[1])  # Difference in X
+
         assert (dx <= 1 and dy <= 1) and (
             dx + dy > 0
         ), "Newborn must be in an adjacent tile"

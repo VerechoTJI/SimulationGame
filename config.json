@@ -1,9 +1,10 @@
 {
   "simulation": {
-    "grid_width": 128,
-    "grid_height": 64,
+    "grid_height": 32,
+    "grid_width": 64,
     "tick_seconds": 0.01666,
-    "tile_size_meters": 1
+    "tile_size_meters": 1,
+    "flow_field_update_interval": 10
   },
   "controls": {
     "speed_adjust_factor": 2,
@@ -14,11 +15,11 @@
   "entities": {
     "human": {
       "attributes": {
-        "max_age": 3200,
+        "max_age": 320000,
         "move_speed": 1,
-        "max_saturation": 100,
-        "hungry_threshold": 50,
-        "reproduction_threshold": 40,
+        "max_saturation": 1000000000000,
+        "hungry_threshold": 1000000000000,
+        "reproduction_threshold": 4000000000000,
         "reproduction_cost": 20,
         "reproduction_cooldown": 320,
         "newborn_saturation_endowment": 20
@@ -26,12 +27,12 @@
     },
     "rice": {
       "attributes": {
-        "max_age": 200,
-        "mature_age": 100,
+        "max_age": 20000000000000000000,
+        "mature_age": 1,
         "saturation_yield": 60
       },
       "spawning": {
-        "natural_spawn_chance": 0.7
+        "natural_spawn_chance": 0.007
       }
     }
   }

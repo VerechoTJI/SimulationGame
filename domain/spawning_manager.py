@@ -29,13 +29,13 @@ class SpawningManager:
         except (KeyError, TypeError):
             return default
 
-    def add_to_replant_queue(self, grid_pos: tuple):
-        """Adds a grid coordinate to the queue for rice replanting."""
-        if grid_pos not in self.replant_queue:
-            self.replant_queue.append(grid_pos)
+    def add_to_replant_queue(self, grid_pos_yx: tuple):
+        """Adds a grid coordinate (y, x) to the queue for rice replanting."""
+        if grid_pos_yx not in self.replant_queue:
+            self.replant_queue.append(grid_pos_yx)
 
     def process_replant_queue(self) -> list[tuple]:
-        """Returns all coordinates in the replant queue and clears it."""
+        """Returns all coordinates (y, x) in the replant queue and clears it."""
         if not self.replant_queue:
             return []
 
@@ -44,49 +44,49 @@ class SpawningManager:
         return coords_to_replant
 
     def get_reproduction_spawn_location(
-        self, parent_grid_pos: tuple, occupied_tiles: set
+        self, parent_grid_pos_yx: tuple, occupied_tiles: set
     ) -> tuple | None:
-        """Finds a valid adjacent walkable tile for a newborn."""
-        x, y = parent_grid_pos
+        """Finds a valid adjacent walkable tile (y, x) for a newborn."""
+        parent_y, parent_x = parent_grid_pos_yx
         possible_spawns = []
         for dy in [-1, 0, 1]:
             for dx in [-1, 0, 1]:
                 if dx == 0 and dy == 0:
                     continue
-                nx, ny = x + dx, y + dy
-                if not (0 <= nx < self.width and 0 <= ny < self.height):
+                ny, nx = parent_y + dy, parent_x + dx
+                if not (0 <= ny < self.height and 0 <= nx < self.width):
                     continue
-                if (nx, ny) in occupied_tiles:
+                if (ny, nx) in occupied_tiles:
                     continue
 
                 tile = self.grid[ny][nx]
                 if tile.tile_move_speed_factor > 0:  # Is walkable
-                    possible_spawns.append((nx, ny))
+                    possible_spawns.append((ny, nx))
 
         return random.choice(possible_spawns) if possible_spawns else None
 
     def get_natural_rice_spawn_location(self, occupied_tiles: set) -> tuple | None:
-        """Determines if and where a new rice plant should spawn naturally."""
+        """Determines if and where (y, x) a new rice plant should spawn naturally."""
         if random.random() > self.rice_spawn_chance_per_tick:
             return None
 
         valid_spawn_tiles = []
         for y in range(self.height):
             for x in range(self.width):
-                if self.grid[y][x].name == "Land" and (x, y) not in occupied_tiles:
+                if self.grid[y][x].name == "Land" and (y, x) not in occupied_tiles:
                     is_adjacent_to_water = False
                     for dy in [-1, 0, 1]:
                         for dx in [-1, 0, 1]:
                             if dx == 0 and dy == 0:
                                 continue
-                            nx, ny = x + dx, y + dy
-                            if 0 <= nx < self.width and 0 <= ny < self.height:
+                            ny, nx = y + dy, x + dx
+                            if 0 <= ny < self.height and 0 <= nx < self.width:
                                 if self.grid[ny][nx].name == "Water":
                                     is_adjacent_to_water = True
                                     break
                         if is_adjacent_to_water:
                             break
                     if is_adjacent_to_water:
-                        valid_spawn_tiles.append((x, y))
+                        valid_spawn_tiles.append((y, x))
 
         return random.choice(valid_spawn_tiles) if valid_spawn_tiles else None
