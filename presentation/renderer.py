@@ -188,7 +188,11 @@ def _render_footer(
     buffer.append(
         "Hotkeys: wasd(scroll) f(flow) p(pause) n(next) +/-(speed) | Cmd: sp <type> <x> <y> | q(quit)"
     )
-    prompt_parts = ["> "]
+    prompt_parts = (
+        ["Type anything non-hotkey to enable cmd (suggest key: space)"]
+        if len(current_input_list) == 0
+        else ["> "]
+    )
     for i, char in enumerate(current_input_list):
         prompt_parts.append(f"\033[7m{char}\033[27m" if i == cursor_pos else char)
     if cursor_pos == len(current_input_list):
