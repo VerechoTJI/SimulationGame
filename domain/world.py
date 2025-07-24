@@ -11,6 +11,8 @@ from .entity_manager import EntityManager
 from .spawning_manager import SpawningManager
 from .flow_field_manager import FlowFieldManager
 from .rice import Rice
+from .human import Human
+from .sheep import Sheep
 
 
 class World:
@@ -34,12 +36,26 @@ class World:
         )
         self._ticks_since_flow_field_update = self._flow_field_update_interval
 
-    def spawn_entity(self, entity_type, pos_y, pos_x):
-        """A simplified spawner that delegates to the EntityManager using (y, x) format."""
-        if entity_type.lower() == "human":
-            self.entity_manager.create_human(pos_y, pos_x)
-        elif entity_type.lower() == "rice":
-            self.entity_manager.create_rice(pos_y, pos_x)
+        self.populate_initial_entities()
+
+    def populate_initial_entities(self):
+        """Populates the world with initial entities based on config."""
+        initial_spawns = self.spawning_manager.get_initial_spawn_locations()
+        for entity_type, (pos_y, pos_x) in initial_spawns:
+            try:
+                self.entity_manager.create_entity(entity_type, pos_y, pos_x)
+            except ValueError as e:
+                self.add_log(f"{Colors.RED}Config Error: {e}{Colors.RESET}")
+
+        self.add_log(f"Spawned {len(initial_spawns)} initial entities.")
+
+    def spawn_entity(self, entity_type: str, pos_y: int, pos_x: int):
+        """
+        Public facade to create an entity. Raises ValueError on unknown type.
+        This is a pure domain operation, no logging.
+        """
+        # Let ValueError from create_entity propagate up to the application layer.
+        self.entity_manager.create_entity(entity_type.lower(), pos_y, pos_x)
 
     def game_tick(self):
         self.tick_count += 1
@@ -55,8 +71,9 @@ class World:
             self.get_grid_position(e.position) for e in self.entity_manager.entities
         }
 
+        # --- FIX: Use generic create_entity ---
         for pos_y, pos_x in self.spawning_manager.process_replant_queue():
-            self.entity_manager.create_rice(pos_y, pos_x)
+            self.entity_manager.create_entity("rice", pos_y, pos_x)
             self.add_log(
                 f"{Colors.GREEN}A Rice plant was replanted at ({pos_y}, {pos_x}).{Colors.RESET}"
             )
@@ -66,7 +83,7 @@ class World:
         )
         if natural_spawn_coord:
             pos_y, pos_x = natural_spawn_coord
-            self.entity_manager.create_rice(pos_y, pos_x)
+            self.entity_manager.create_entity("rice", pos_y, pos_x)
             self.add_log(
                 f"{Colors.GREEN}A new Rice plant sprouted at ({pos_y}, {pos_x}).{Colors.RESET}"
             )
@@ -75,26 +92,33 @@ class World:
             if entity.is_alive():
                 entity.tick(self)
 
-                if hasattr(entity, "can_reproduce") and entity.can_reproduce():
-                    parent_grid_pos_yx = self.get_grid_position(entity.position)
-                    current_occupied = {
-                        self.get_grid_position(e.position)
-                        for e in self.entity_manager.entities
-                    }
-                    spawn_pos_yx = (
-                        self.spawning_manager.get_reproduction_spawn_location(
-                            parent_grid_pos_yx, current_occupied
-                        )
+        newly_born_entities = []
+        for entity in list(
+            self.entity_manager.entities
+        ):  # Use a copy as the list might grow
+            if hasattr(entity, "can_reproduce") and entity.can_reproduce():
+                parent_grid_pos_yx = self.get_grid_position(entity.position)
+                current_occupied = {
+                    self.get_grid_position(e.position)
+                    for e in self.entity_manager.entities
+                }
+                spawn_pos_yx = self.spawning_manager.get_reproduction_spawn_location(
+                    parent_grid_pos_yx, current_occupied
+                )
+                if spawn_pos_yx:
+                    entity_type_str = entity.name.split("_")[0].lower()
+                    newborn_saturation = entity.reproduce()
+                    spawn_y, spawn_x = spawn_pos_yx
+                    newborn = self.entity_manager.create_entity(
+                        entity_type_str,
+                        spawn_y,
+                        spawn_x,
+                        saturation=newborn_saturation,  # Changed 'initial_saturation' to 'saturation'
                     )
-                    if spawn_pos_yx:
-                        newborn_saturation = entity.reproduce()
-                        spawn_y, spawn_x = spawn_pos_yx
-                        newborn = self.entity_manager.create_human(
-                            spawn_y, spawn_x, initial_saturation=newborn_saturation
-                        )
-                        self.add_log(
-                            f"{Colors.MAGENTA}{entity.name} has given birth to {newborn.name}!{Colors.RESET}"
-                        )
+                    self.add_log(
+                        f"{Colors.MAGENTA}{entity.name} has given birth to {newborn.name}!{Colors.RESET}"
+                    )
+                    newly_born_entities.append(newborn)
 
         removed_entities = self.entity_manager.cleanup_dead_entities()
         for entity in removed_entities:

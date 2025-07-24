@@ -148,18 +148,17 @@ class TestSpawningIntegration:
         tile_size = mock_config["simulation"]["tile_size_meters"]
         entity_manager = EntityManager(mock_config, tile_size)
 
-        rice = entity_manager.create_rice(pos_y=1, pos_x=1)
-        rice_pos_yx = (1, 1)  # Correct (y, x) format
+        # --- FIX: Use the new create_entity method ---
+        rice = entity_manager.create_entity("rice", pos_y=1, pos_x=1)
+        rice_pos_yx = (1, 1)
         rice.get_eaten()
 
         # ACT 1: Cleanup and Queueing
         removed_entities = entity_manager.cleanup_dead_entities()
         assert len(removed_entities) == 1
 
-        # This part simulates the logic from World.game_tick
         entity = removed_entities[0]
         if hasattr(entity, "is_eaten") and entity.is_eaten:
-            # Correctly derive grid pos from world pos [y, x]
             grid_y = int(entity.position[0] / tile_size)
             grid_x = int(entity.position[1] / tile_size)
             simple_spawning_manager.add_to_replant_queue((grid_y, grid_x))
@@ -172,7 +171,8 @@ class TestSpawningIntegration:
         # ACT 2: Process the queue and respawn
         coords_to_replant = simple_spawning_manager.process_replant_queue()
         for pos_y, pos_x in coords_to_replant:
-            entity_manager.create_rice(pos_y, pos_x)
+            # --- FIX: Use the new create_entity method ---
+            entity_manager.create_entity("rice", pos_y=pos_y, pos_x=pos_x)
 
         # ASSERT 2: A new rice plant exists
         assert len(simple_spawning_manager.replant_queue) == 0
@@ -180,3 +180,38 @@ class TestSpawningIntegration:
         new_rice = next(e for e in entity_manager.entities if isinstance(e, Rice))
         assert new_rice is not None
         assert new_rice.age == 0
+
+
+class TestInitialSpawning:
+    def test_get_initial_spawn_locations(self, simple_spawning_manager, mock_config):
+        """
+        Tests that the manager generates correct initial spawn locations
+        based on the config file.
+        """
+        # ARRANGE
+        # --- FIX: Request a number of entities that fits on the 7-tile grid ---
+        mock_config["spawning"] = {
+            "human": {"initial_spawn_count": 4},  # Changed from 5 to 4
+            "sheep": {"initial_spawn_count": 3},
+        }
+        # Re-initialize the manager with the new config
+        manager = SpawningManager(simple_spawning_manager.grid, mock_config)
+
+        # ACT
+        spawn_list = manager.get_initial_spawn_locations()
+
+        # ASSERT
+        human_spawns = [s for s in spawn_list if s[0] == "human"]
+        sheep_spawns = [s for s in spawn_list if s[0] == "sheep"]
+
+        assert len(human_spawns) == 4  # Changed from 5 to 4
+        assert len(sheep_spawns) == 3
+
+        all_spawn_coords = [s[1] for s in spawn_list]
+        # Total spawns should be 7
+        assert len(set(all_spawn_coords)) == 7
+
+        # Check that all spawns are on valid land tiles
+        grid = simple_spawning_manager.grid
+        for _, (y, x) in spawn_list:
+            assert grid[y][x].tile_move_speed_factor > 0

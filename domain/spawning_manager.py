@@ -29,6 +29,37 @@ class SpawningManager:
         except (KeyError, TypeError):
             return default
 
+    def get_initial_spawn_locations(self) -> list[tuple[str, tuple[int, int]]]:
+        """
+        Generates a list of (entity_type, (y, x)) tuples for initial world population.
+        """
+        spawn_list = []
+        occupied_tiles = set()
+
+        spawn_configs = self._get_config("spawning", default={})
+
+        # Find all possible spawn points (walkable tiles) once
+        possible_spawn_points = []
+        for r in range(self.height):
+            for c in range(self.width):
+                if self.grid[r][c].tile_move_speed_factor > 0:
+                    possible_spawn_points.append((r, c))
+
+        random.shuffle(possible_spawn_points)
+
+        for entity_type, rules in spawn_configs.items():
+            count = rules.get("initial_spawn_count", 0)
+
+            for _ in range(count):
+                if not possible_spawn_points:
+                    # No more available spots
+                    break
+
+                spawn_pos = possible_spawn_points.pop()
+                spawn_list.append((entity_type, spawn_pos))
+
+        return spawn_list
+
     def add_to_replant_queue(self, grid_pos_yx: tuple):
         """Adds a grid coordinate (y, x) to the queue for rice replanting."""
         if grid_pos_yx not in self.replant_queue:

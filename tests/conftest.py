@@ -33,6 +33,18 @@ def mock_config():
                     "newborn_saturation_endowment": 40,
                 }
             },
+            "sheep": {
+                "attributes": {
+                    "max_age": 80,
+                    "move_speed": 0.7,
+                    "max_saturation": 80,
+                    "hungry_threshold": 50,
+                    "reproduction_threshold": 70,
+                    "reproduction_cost": 20,
+                    "reproduction_cooldown": 30,
+                    "newborn_saturation_endowment": 20,
+                }
+            },
             "rice": {
                 "attributes": {
                     "max_age": 16,
@@ -95,16 +107,27 @@ def world_factory(mock_config):
     return _create_world
 
 
-# --- NEW GLOBAL FIXTURE ---
 @pytest.fixture
 def world_no_spawn(world_factory, mock_config):
     """
-    A global fixture for a world with natural spawning disabled
+    A global fixture for a world with all spawning (initial and natural) disabled
     and a fixed map seed for deterministic tests.
     """
     # Use deepcopy to ensure test isolation
     test_config = copy.deepcopy(mock_config)
-    # Disable natural rice spawning
+
+    # --- THIS IS THE FIX ---
+    # Disable initial population spawning
+    test_config["spawning"] = {
+        "human": {"initial_spawn_count": 0},
+        "sheep": {"initial_spawn_count": 0},
+        "rice": {"natural_spawn_chance": 0.0},  # Keep this for clarity
+    }
+
+    # Also disable natural rice spawning (which is now redundant but safe)
+    if "spawning" not in test_config["entities"]["rice"]:
+        test_config["entities"]["rice"]["spawning"] = {}
     test_config["entities"]["rice"]["spawning"]["natural_spawn_chance"] = 0.0
+
     # The map_seed is already in the base mock_config for predictability
     return world_factory(custom_config=test_config)

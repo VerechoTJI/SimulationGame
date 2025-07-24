@@ -3,6 +3,7 @@ from domain.world import World
 from domain.entity import Colors
 from domain.human import Human
 from domain.rice import Rice
+from domain.sheep import Sheep
 from .config import config
 
 
@@ -69,26 +70,38 @@ class GameService:
         self._adjust_speed(up=False)
 
     def execute_user_command(self, command_text: str):
-        """Parses and executes commands typed by the user."""
+        """Parses and executes commands, handling domain exceptions."""
         parts = command_text.strip().split()
         if not parts:
             return
 
-        try:
-            # User command is "sp <type> <x> <y>"
-            if len(parts) == 4 and parts[0].lower() == "sp":
+        command = parts[0].lower()
+
+        if command == "sp" and len(parts) == 4:
+            try:
                 entity_type = parts[1]
+                # --- NOTE: The user provides (x, y), we use (y, x) internally ---
                 x = int(parts[2])
                 y = int(parts[3])
-                # --- FIX: Call world.spawn_entity with (y, x) order ---
+
+                # --- THIS IS THE ARCHITECTURAL FIX ---
+                # 1. Call the domain method
                 self.world.spawn_entity(entity_type, y, x)
-            else:
+                # 2. On success, the Application layer logs it
                 self.world.add_log(
-                    f"{Colors.RED}Unknown command: '{command_text}'{Colors.RESET}"
+                    f"{Colors.GREEN}Successfully spawned a {entity_type} at ({y}, {x}).{Colors.RESET}"
                 )
-        except (ValueError, IndexError):
+
+            except ValueError as e:
+                # 3. On failure, the Application layer catches the domain error and logs it
+                self.world.add_log(f"{Colors.RED}Command failed: {e}{Colors.RESET}")
+            except IndexError:
+                self.world.add_log(
+                    f"{Colors.RED}Invalid command format for 'sp'. Use: sp <type> <x> <y>{Colors.RESET}"
+                )
+        else:
             self.world.add_log(
-                f"{Colors.RED}Invalid command format: '{command_text}'{Colors.RESET}"
+                f"{Colors.RED}Unknown command: '{command_text}'{Colors.RESET}"
             )
 
     def tick(self):
@@ -105,22 +118,29 @@ class GameService:
         ]
 
         human_statuses = []
+        sheep_statuses = []  # Add a list for sheep
         for entity in self.world.entity_manager.entities:
-            # --- FIX: entity.position is [y, x], so calculate grid coords correctly ---
             grid_y = int(entity.position[0] / self.world.tile_size_meters)
             grid_x = int(entity.position[1] / self.world.tile_size_meters)
 
             if 0 <= grid_y < self.world.height and 0 <= grid_x < self.world.width:
+                color = Colors.WHITE
                 if isinstance(entity, Human):
                     color = Colors.RED if entity.is_hungry() else Colors.MAGENTA
                     human_statuses.append(
                         f"{color}{entity.name:<10s}{Colors.RESET}"
                         f" Sat: {entity.saturation:>3}/{entity.max_saturation}"
                     )
+                # --- NEW: Handle Sheep ---
+                elif isinstance(entity, Sheep):
+                    color = Colors.CYAN if not entity.is_hungry() else Colors.BLUE
+                    sheep_statuses.append(
+                        f"{color}{entity.name:<10s}{Colors.RESET}"
+                        f" Sat: {entity.saturation:>3}/{entity.max_saturation}"
+                    )
                 elif isinstance(entity, Rice):
                     color = Colors.GREEN if entity.matured else Colors.YELLOW
-                else:
-                    color = Colors.WHITE
+
                 display_grid[grid_y][grid_x] = color + entity.symbol
 
         render_payload = {
@@ -131,6 +151,7 @@ class GameService:
             "logs": self.world.log_messages,
             "colors": Colors,
             "human_statuses": human_statuses,
+            "sheep_statuses": sheep_statuses,  # Add sheep statuses to payload
             "is_paused": self._is_paused,
             "tick_seconds": self._tick_seconds,
             "base_tick_seconds": self._base_tick_seconds,

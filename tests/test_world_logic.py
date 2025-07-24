@@ -11,6 +11,32 @@ def world_instance(world_factory):
     return world_factory(width=10, height=10)
 
 
+class TestWorldCommands:
+    def test_spawn_entity_command_succeeds(self, world_no_spawn):
+        """Tests that the world's facade method for spawning works."""
+        world = world_no_spawn
+        assert len(world.entity_manager.entities) == 0
+
+        # ACT
+        world.spawn_entity("human", pos_y=2, pos_x=3)
+
+        # ASSERT
+        assert len(world.entity_manager.entities) == 1
+        assert isinstance(world.entity_manager.entities[0], Human)
+
+    def test_spawn_entity_command_raises_error_on_invalid_type(self, world_no_spawn):
+        """Tests that spawning an unknown entity type raises a ValueError."""
+        world = world_no_spawn
+
+        # ACT & ASSERT
+        # The domain should raise an error, not log a message.
+        with pytest.raises(ValueError, match="Unknown entity type: dragon"):
+            world.spawn_entity("dragon", pos_y=1, pos_x=1)
+
+        # Ensure no entity was created
+        assert len(world.entity_manager.entities) == 0
+
+
 class TestWorldReproduction:
     def test_world_tick_spawns_new_human_from_reproduction(
         self, world_no_spawn, human_config
@@ -18,9 +44,8 @@ class TestWorldReproduction:
         # ARRANGE
         world = world_no_spawn
 
-        # Use the entity manager with (y, x) to create the parent
-        parent = world.entity_manager.create_human(pos_y=5, pos_x=5)
-        # Manually set state for reproduction
+        # --- FIX: Use the generic create_entity for test setup ---
+        parent = world.entity_manager.create_entity("human", pos_y=5, pos_x=5)
         parent.saturation = 100
         parent.reproduction_cooldown = 0
 
@@ -29,7 +54,7 @@ class TestWorldReproduction:
         # ACT
         world.game_tick()
 
-        # ASSERT
+        # ASSERT (rest of the assertions are unchanged and correct)
         entities = world.entity_manager.entities
         assert len(entities) == 2, "World should now contain two entities."
 
