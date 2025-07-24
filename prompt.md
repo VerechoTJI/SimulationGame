@@ -1,4 +1,4 @@
-### **New Start Prompt v0.8**
+### **New Start Prompt v0.9**
 
 Hello! Your task is to continue the development of a Python command-line simulation game. The project follows Domain-Driven Design (DDD), Test-Driven Development (TDD), and Clean Architecture principles.
 
@@ -18,24 +18,24 @@ Hello! Your task is to continue the development of a Python command-line simulat
 - **World:** A grid-based map with Land, Water, and Mountain tiles affecting movement.
 - **Entities:**
   - `Human`: Navigates using a hybrid system: a centralized **Flow Field** for scalable food-seeking when hungry, and **A\*** for individual wandering when not. Has `saturation`, eats `Rice`, and reproduces.
-  - `Sheep`: **(New)** A simple animal that wanders using A\*, eats `Rice` when hungry (using a localized spatial hash search), and reproduces.
+  - `Sheep`: A simple animal that wanders using A\*, eats `Rice` when hungry, and reproduces. Its food-seeking is now a **long-range, radius-based search** using the spatial hash, and it can correctly filter for _mature_ rice.
   - `Rice`: Matures over time and spawns naturally.
-  - **Optimization:** All entities are managed by a generic **Object Pooling** system to reduce runtime overhead. All entities are tracked by a **Spatial Hash** grid for fast, proximity-based lookups.
+  - **Optimization:** All entities are managed by a generic **Object Pooling** system. All entities are tracked by a **Spatial Hash** grid for fast, proximity-based lookups.
 
 **Project File Hierarchy & Explanations:**
 
-- `config.json`: **Data-driven core.** Defines all simulation parameters, including entity attributes and spawning rules.
+- `config.json`: **Data-driven core.** Defines all simulation parameters, including entity attributes, spawning rules, and AI behaviors like search radius.
 - `cli_main.py`: **Minimal entry point.** Sets up Python path, calls main run function.
 - `presentation/`: **Presentation Layer.**
   - `__init__.py`: Marks as a package.
   - `main.py`: Orchestrates the CLI app, initializes services, `shared_state`, and threads.
   - `input_handler.py`: Manages keyboard input, updates `keys_down`, and dispatches commands.
-  - `renderer.py`: Contains the `display` function responsible for drawing the entire game state to the terminal. Now handles rendering `Sheep`.
-  - `game_loop.py`: Contains the primary `game_loop`. It handles smooth camera movement, drains the `command_queue` for logic commands, and controls the timed game tick.
+  - `renderer.py`: Contains the `display` function responsible for drawing the entire game state to the terminal.
+  - `game_loop.py`: Contains the primary `game_loop`. It handles smooth camera movement, drains the `command_queue`, and controls the timed game tick.
 - `application/`: **Application Layer.**
   - `__init__.py`: Marks as a package.
   - `config.py`: Singleton for loading `config.json`.
-  - `game_service.py`: Exposes application use cases (e.g., `toggle_pause`, `execute_user_command`). Catches domain errors and translates them into user-facing log messages. Orchestrates the domain layer and prepares render data.
+  - `game_service.py`: Exposes application use cases (e.g., `toggle_pause`, `execute_user_command`). Catches domain errors and translates them into user-facing log messages.
 - `domain/`: **Domain Layer.**
   - `__init__.py`: Marks as a package.
   - `object_pool.py`: Generic `ObjectPool` and `PooledObjectMixin`.
@@ -43,35 +43,35 @@ Hello! Your task is to continue the development of a Python command-line simulat
   - `tile.py`: Defines `Tile` class and `TILES` dictionary.
   - `pathfinder.py`: A\* pathfinding logic, encapsulated in a `Pathfinder` class.
   - `flow_field_manager.py`: Generates vector fields using Dijkstra.
-  - `spatial_hash.py`: A generic spatial hash grid for fast, proximity-based entity lookups. Configured with a cell size.
-  - `entity_manager.py`: **Heavily refactored.** Manages entity lifecycle and object pools dynamically based on `config.json`. It no longer has hardcoded logic for specific entities. It holds a dictionary of object pools and a dictionary of spatial hashes, one for each entity type defined in the config.
-  - `spawning_manager.py`: **Refactored.** Manages entity spawning rules. Now reads the `spawning` section of `config.json` to handle initial population of any entity type.
+  - `spatial_hash.py`: **Updated.** A generic spatial hash grid. Now includes `find_closest_in_radius` for optimized single-target searches and `find_in_radius` for getting all entities within an area.
+  - `entity_manager.py`: **Heavily refactored.** Manages entity lifecycle and object pools. **Crucially, it now uses Python's `inspect` module** to intelligently pass only the relevant attributes from the config to entity constructors, making it truly robust and generic. It also provides a powerful `find_closest_entity_in_radius` facade that correctly handles complex predicate-based searches over large distances.
+  - `spawning_manager.py`: Manages entity spawning rules based on `config.json`.
   - `human.py`: Logic for the `Human` entity.
-  - `sheep.py`: **(New)** Logic for the `Sheep` entity. Includes a `reset()` method for object pool compatibility.
+  - `sheep.py`: **Updated.** Logic for the `Sheep` entity. Now uses its `search_radius` attribute to call the `EntityManager`'s long-range search function.
   - `rice.py`: Logic for the `Rice` entity.
-  - `world.py`: **Refactored.** Central domain facade. Now uses the refactored managers to populate the world and handle reproduction generically. Has a clean `spawn_entity` facade for application-layer commands.
+  - `world.py`: Central domain facade. Uses the refactored managers for all entity operations.
 - `tests/`: **Testing Layer.**
   - `__init__.py`: Marks as a package.
-  - `conftest.py`: Shared pytest fixtures. The `mock_config` now includes `sheep` attributes. The `world_no_spawn` fixture is updated to provide a truly empty world by overriding initial spawn counts, including `mock_config` and `world_no_spawn` (a deterministic World for integration testing).
+  - `conftest.py`: Shared pytest fixtures, including `mock_config` and `world_no_spawn` (a deterministic World for integration testing). `mock_config` is updated to include `sheep` search radius.
   - `test_object_pool.py`: Unit tests for `ObjectPool`.
   - `test_pathfinder.py`: Unit tests for `Pathfinder`.
   - `test_flow_field_manager.py`: Unit tests for `FlowFieldManager`.
-  - `test_spatial_hash.py`: **(New)** Unit tests verifying the `SpatialHash` component's logic (add, remove, find_nearby, update).
-  - `test_entity_manager.py`: **Heavily updated.** All tests refactored to validate the new data-driven `EntityManager` and its generic `create_entity` method.
-  - `test_spawning_manager.py`: Updated with tests for the generic initial spawning logic.
-  - `test_human_logic.py`: Unit tests for `Human` logic. **Now mocks the `EntityManager`'s search method** to properly test the `Human` in isolation.
-  - `test_rice_logic.py`: Logic unit tests for entities.
-  - `test_sheep_logic.py`: **(New)** Comprehensive unit tests for all `Sheep` behaviors (movement, eating, reproduction).
-  - `test_game_service.py`: Unit tests for `GameService`, now testing the `execute_user_command` error handling.
-  - `test_world_logic.py`: **Updated.** Tests refactored to use the new `EntityManager` interface and to test the `world.spawn_entity` facade.
-  - `test_domain_integration.py`: **Updated.** Tests refactored to use the new `EntityManager` interface. Added a new smoke test to ensure all entity types can coexist in the world.
+  - `test_spatial_hash.py`: **Updated.** Now includes tests for `find_closest_in_radius` and `find_in_radius`.
+  - `test_entity_manager.py`: **Updated.** Includes a new, critical **integration test** (`test_find_closest_entity_in_radius_with_predicate`) that validates the manager's ability to perform a correct, filtered, long-range search without mocks.
+  - `test_spawning_manager.py`: Tests for the generic initial spawning logic.
+  - `test_human_logic.py`: Unit tests for `Human` logic.
+  - `test_rice_logic.py`: **Updated.** Tests are now robust against unrelated config changes due to the `EntityManager` refactoring.
+  - `test_sheep_logic.py`: **Updated.** Includes tests for the new long-range food-seeking AI. All test assertions are now correctly aligned with config keys.
+  - `test_game_service.py`: Unit tests for `GameService`.
+  - `test_world_logic.py`: Tests for `World` logic.
+  - `test_domain_integration.py`: Integration tests for the whole domain layer.
 
 **Recent Accomplishments & Key Learnings:**
 
-1.  **Added `Sheep` Entity:** We successfully added a new, autonomous `Sheep` entity to the simulation, complete with wandering, eating, and reproduction logic, driven entirely by TDD.
-2.  **Data-Driven Entity Management:** In the process of adding `Sheep`, we refactored the `EntityManager` and `SpawningManager` away from hardcoded logic. They now dynamically configure themselves based _entirely_ on the contents of `config.json`. This makes adding future entities incredibly simple, often requiring only a config change and a new entity logic file.
-3.  **Refined Architectural Boundaries:** We had a critical learning moment where we initially placed application-level logic (user feedback/logging) inside the domain layer (`World`). We corrected this by having the domain layer raise an exception (`ValueError`) and letting the application layer (`GameService`) catch it and create the appropriate log message. This strictly enforces the Clean Architecture principle of keeping the domain pure.
-4.  **Robust Test-Driven Debugging:** We demonstrated the power of a comprehensive test suite. The tests correctly caught numerous regressions and inconsistencies introduced during our refactoring, including issues with object pool `reset` methods, outdated test assumptions, and subtle misconfigurations between test fixtures and production code. This validated our TDD approach.
+1.  **Implemented Long-Range AI:** We successfully gave `Sheep` the ability to find food over long distances. This involved enhancing the `SpatialHash` and `EntityManager` with radius-based search capabilities.
+2.  **Architectural Refactoring with `inspect`:** We encountered a critical `TypeError` when our `EntityManager` blindly passed all configured attributes to entity constructors. We fixed this by refactoring the `EntityManager` to use Python's `inspect` module. It now intelligently filters keyword arguments, ensuring a method only receives the parameters it explicitly defines. This makes the entity management system truly generic, robust, and data-driven, a major architectural improvement.
+3.  **The Power of Integration Testing:** Our TDD process initially had a flaw where mocked tests for the `Sheep`'s AI passed, but the underlying implementation in `EntityManager` was incorrect. By adding a non-mocked **integration test** specifically for the `EntityManager`'s predicate search logic, we correctly identified and fixed the bug. This was a key learning moment: unit tests and mocked tests are essential, but targeted integration tests are invaluable for verifying the contracts between components.
+4.  **Maintaining Test Suite Health:** We identified and fixed several minor bugs in the test suite itself, including incorrect assertion keys (`reproduction_cooldown_max`). This reinforces the importance of treating test code as first-class production code.
 
 **IMPORTANT: Our Interaction Model**
 **Development Workflow:**
@@ -91,3 +91,4 @@ To ensure accuracy, you operate in a context-limited mode and do not have persis
 2.  You **do not** have the full code for every module memorized. You must rely on the file hierarchy and explanations provided above as your primary "map" of the project.
 3.  **Before you suggest any modifications to an existing file, you MUST first ask me to provide its full and current code.** For example, say: "Understood. We need to modify `domain/human.py` and `domain/world.py`. Please provide me with the full contents of both files."
 4.  When providing code, you will typically only post the modified part unless a full file replacement is necessary.
+5.  Make sure you included the file path at the start of code, ex: `# tests/test_spatial_hash.py`
