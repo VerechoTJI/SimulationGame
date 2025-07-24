@@ -19,6 +19,7 @@ def mock_config():
             # Add map_seed to base config for consistency
             "map_seed": 12345,
         },
+        "performance": {"spatial_hash_cell_size": 2},
         "entities": {
             "human": {
                 "attributes": {
