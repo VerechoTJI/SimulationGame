@@ -12,7 +12,7 @@ from domain.entity import Entity
 class MockEntityManager:
     def __init__(self):
         self.entities = []
-        self.find_nearest_entity = MagicMock()
+        self.find_nearest_entity_in_vicinity = MagicMock()
 
 
 class MockWorld:
@@ -97,7 +97,9 @@ class TestHumanInternalState:
         # ARRANGE
         initial_saturation = human.saturation
         # --- FIX: Explicitly mock the dependency for this test case ---
-        mock_world_with_entities.entity_manager.find_nearest_entity.return_value = None
+        mock_world_with_entities.entity_manager.find_nearest_entity_in_vicinity.return_value = (
+            None
+        )
 
         # ACT
         human.tick(mock_world_with_entities)
@@ -121,7 +123,9 @@ class TestHumanAI:
         human.saturation = 30
         human.position = np.array([55.0, 55.0])
         initial_pos = human.position.copy()
-        mock_world_with_entities.entity_manager.find_nearest_entity.return_value = None
+        mock_world_with_entities.entity_manager.find_nearest_entity_in_vicinity.return_value = (
+            None
+        )
         grid_y, grid_x = mock_world_with_entities.get_grid_position(human.position)
         mock_world_with_entities.food_flow_field[grid_y, grid_x] = np.array([1, 1])
         human.tick(mock_world_with_entities)
@@ -132,7 +136,9 @@ class TestHumanAI:
     def test_not_hungry_human_wanders_using_path(self, human, mock_world_with_entities):
         human.saturation = 80
         assert not human.path
-        mock_world_with_entities.entity_manager.find_nearest_entity.return_value = None
+        mock_world_with_entities.entity_manager.find_nearest_entity_in_vicinity.return_value = (
+            None
+        )
         human.tick(mock_world_with_entities)
         assert human.path
         assert human.path == [(1, 1), (2, 2)]
@@ -142,7 +148,9 @@ class TestHumanAI:
     ):
         human.saturation = 80
         human.position = np.array([55.0, 55.0])
-        mock_world_with_entities.entity_manager.find_nearest_entity.return_value = None
+        mock_world_with_entities.entity_manager.find_nearest_entity_in_vicinity.return_value = (
+            None
+        )
         human.tick(mock_world_with_entities)
         assert human.path
         grid_y, grid_x = mock_world_with_entities.get_grid_position(human.position)
@@ -158,12 +166,12 @@ class TestHumanAI:
         human.position = np.array([55.0, 55.0])
         rice_plant.position = np.array([56.0, 56.0])
         rice_plant.age = rice_plant.mature_age
-        mock_world_with_entities.entity_manager.find_nearest_entity.return_value = (
+        mock_world_with_entities.entity_manager.find_nearest_entity_in_vicinity.return_value = (
             rice_plant
         )
         initial_saturation = human.saturation
         human.tick(mock_world_with_entities)
-        mock_world_with_entities.entity_manager.find_nearest_entity.assert_called_once()
+        mock_world_with_entities.entity_manager.find_nearest_entity_in_vicinity.assert_called_once()
         assert human.saturation > initial_saturation
         assert rice_plant.is_eaten is True
 
@@ -174,7 +182,7 @@ class TestHumanAI:
         human.position = np.array([55.0, 55.0])
         rice_plant.position = np.array([80.0, 80.0])
         rice_plant.age = rice_plant.mature_age
-        mock_world_with_entities.entity_manager.find_nearest_entity.return_value = (
+        mock_world_with_entities.entity_manager.find_nearest_entity_in_vicinity.return_value = (
             rice_plant
         )
         initial_saturation = human.saturation

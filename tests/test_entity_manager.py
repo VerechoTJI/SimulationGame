@@ -105,7 +105,7 @@ class TestEntityManagerFindNearest:
         rice_far = entity_manager.create_rice(pos_y=8, pos_x=8)
         entity_manager.create_human(pos_y=0, pos_x=0)
         origin_pos_yx = np.array([24.0, 24.0])
-        found = entity_manager.find_nearest_entity(origin_pos_yx, Rice)
+        found = entity_manager.find_nearest_entity_in_vicinity(origin_pos_yx, Rice)
         assert found is not None
         assert (
             found.id == rice_mid.id
@@ -127,15 +127,11 @@ class TestEntityManagerFindNearest:
         rice_far_matured = entity_manager.create_rice(pos_y=8, pos_x=8)  # pos (85, 85)
         rice_far_matured.age = rice_far_matured.mature_age  # Mature
 
-        # Search from (5,5). Cell size is 10. Search radius covers cells up to (y=1, x=1),
-        # so world positions up to ~20.0 are included.
-        # rice_mid_matured at (25, 25) is in cell (2,2), which is outside the 3x3 search grid.
-        # Oh, let's adjust the test to be correct.
-        # Search from (15, 15). Close is in (1,1), Mid is in (2,2). Both are searched.
+        # Search from (16, 16). Close is in (1,1), Mid is in (2,2). Both are searched.
         origin_pos_yx = np.array([16.0, 16.0])
 
         # ACT
-        found = entity_manager.find_nearest_entity(
+        found = entity_manager.find_nearest_entity_in_vicinity(
             origin_pos_yx, Rice, predicate=lambda r: r.matured
         )
 
@@ -146,7 +142,7 @@ class TestEntityManagerFindNearest:
     def test_returns_none_if_no_matching_entity_found(self, entity_manager):
         entity_manager.create_human(pos_y=1, pos_x=1)
         origin_pos_yx = np.array([5.0, 5.0])
-        found = entity_manager.find_nearest_entity(origin_pos_yx, Rice)
+        found = entity_manager.find_nearest_entity_in_vicinity(origin_pos_yx, Rice)
         assert found is None
 
     def test_returns_none_if_no_entities_in_spatial_hash_vicinity(self, entity_manager):
@@ -157,7 +153,7 @@ class TestEntityManagerFindNearest:
         origin_pos_yx = np.array([5.0, 5.0])
 
         # ACT
-        found = entity_manager.find_nearest_entity(origin_pos_yx, Rice)
+        found = entity_manager.find_nearest_entity_in_vicinity(origin_pos_yx, Rice)
 
         # ASSERT
         assert found is None

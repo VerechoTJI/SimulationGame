@@ -45,7 +45,7 @@ Hello! Your task is to continue the development of a Python command-line simulat
   - `spatial_hash.py`: **(New)** A generic spatial hash grid for fast, proximity-based entity lookups. Configured with a cell size.
   - `entity_manager.py`: Manages entity lifecycle and object pools. **Now contains a `SpatialHash` for `Rice` entities** to provide a fast, limited-range search for food.
   - `spawning_manager.py`: Manages entity spawning rules.
-  - `human.py`: Logic for the `Human` entity. **Its eating logic now calls `EntityManager.find_nearest_entity`**, removing a major performance bottleneck. Implements a hybrid movement model, switching between following the `World`'s flow field and using A\* for wandering.
+  - `human.py`: Logic for the `Human` entity. **Its eating logic now calls `EntityManager.find_nearest_entity_in_vicinity`**, removing a major performance bottleneck. Implements a hybrid movement model, switching between following the `World`'s flow field and using A\* for wandering.
   - `rice.py`: Logic for the `Rice` entity.
   - `world.py`: Central domain facade. Orchestrates the `game_tick`, delegating tasks to its managers.
 - `tests/`: **Testing Layer.**

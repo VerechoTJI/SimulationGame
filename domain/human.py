@@ -89,7 +89,7 @@ class Human(Entity):
         if not self.is_alive():
             return
 
-        nearest_food = world.entity_manager.find_nearest_entity(
+        nearest_food = world.entity_manager.find_nearest_entity_in_vicinity(
             self.position, Rice, predicate=lambda r: r.matured
         )
 

@@ -85,10 +85,12 @@ class EntityManager:
                 entity.release()
         return removed_entities
 
-    def find_nearest_entity(self, origin_pos_yx, entity_type, predicate=None):
+    def find_nearest_entity_in_vicinity(
+        self, origin_pos_yx, entity_type, predicate=None
+    ):
         """
-        Finds the nearest entity of a given type within a limited perception range.
-        Uses spatial hashing for optimized searching of Rice entities.
+        Finds the nearest entity of a given type within the local vicinity.
+        Uses spatial hashing for optimized searching of Rice and Human entities.
         """
         closest_entity = None
         min_dist_sq = float("inf")
