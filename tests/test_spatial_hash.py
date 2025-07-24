@@ -1,4 +1,4 @@
-# test/test_spatial_hash.py
+# tests/test_spatial_hash.py
 import numpy as np
 import pytest
 
@@ -9,7 +9,7 @@ from domain.spatial_hash import SpatialHash
 # A simple mock entity class for testing purposes
 class MockEntity:
     def __init__(self, y, x):
-        self.position = np.array([y, x])
+        self.position = np.array([y, x], dtype=float)
         self.id = id(self)  # Unique identifier
 
     def __repr__(self):
@@ -69,7 +69,7 @@ class TestSpatialHash:
         assert entity in spatial_hash.grid[cell_coords]
 
         spatial_hash.remove(entity)
-        assert not spatial_hash.grid[cell_coords]  # Cell list should be empty
+        assert not spatial_hash.grid.get(cell_coords)
 
     def test_remove_nonexistent_entity(self, spatial_hash):
         # This should not raise an error
@@ -147,7 +147,7 @@ class TestSpatialHash:
         entity.position = new_position  # Don't forget to update the mock entity
 
         # Check new state
-        assert not spatial_hash.grid[(2, 2)]  # Old cell should be empty
+        assert not spatial_hash.grid.get((2, 2))  # Old cell should be empty or deleted
         assert entity in spatial_hash.grid[(4, 4)]
         assert len(spatial_hash.grid[(4, 4)]) == 1
 
@@ -166,3 +166,66 @@ class TestSpatialHash:
         assert len(spatial_hash.grid) == 1
         assert entity in spatial_hash.grid[(2, 2)]
         assert len(spatial_hash.grid[(2, 2)]) == 1
+
+    # --- TESTS FOR find_closest_in_radius ---
+
+    def test_find_closest_in_radius_finds_nearest(self, spatial_hash):
+        origin = np.array([50.0, 50.0])
+        entity_close = MockEntity(52, 52)
+        entity_mid = MockEntity(35, 35)
+        entity_far = MockEntity(80, 80)
+        spatial_hash.add(entity_close)
+        spatial_hash.add(entity_mid)
+        spatial_hash.add(entity_far)
+        found_entity = spatial_hash.find_closest_in_radius(origin, 50)
+        assert found_entity is not None
+        assert found_entity.id == entity_close.id
+
+    def test_find_closest_in_radius_respects_radius_limit(self, spatial_hash):
+        origin = np.array([50.0, 50.0])
+        entity_inside = MockEntity(55, 55)
+        entity_outside = MockEntity(30, 30)
+        spatial_hash.add(entity_inside)
+        spatial_hash.add(entity_outside)
+        found_entity = spatial_hash.find_closest_in_radius(origin, 10)
+        assert found_entity is not None
+        assert found_entity.id == entity_inside.id
+        found_entity_none = spatial_hash.find_closest_in_radius(origin, 5)
+        assert found_entity_none is None
+
+    # --- NEW TESTS FOR find_in_radius ---
+
+    def test_find_in_radius_finds_all_within_distance(self, spatial_hash):
+        """Tests that the method finds all entities within the given radius."""
+        origin = np.array([50.0, 50.0])
+        entity_inside_1 = MockEntity(55, 55)  # dist ~7.07
+        entity_inside_2 = MockEntity(48, 48)  # dist ~2.8
+        entity_outside = MockEntity(30, 30)  # dist ~28.28
+
+        spatial_hash.add(entity_inside_1)
+        spatial_hash.add(entity_inside_2)
+        spatial_hash.add(entity_outside)
+
+        # Search with a radius that includes the two 'inside' entities
+        found_entities = spatial_hash.find_in_radius(origin, 10)
+
+        assert len(found_entities) == 2
+        found_ids = {e.id for e in found_entities}
+        assert entity_inside_1.id in found_ids
+        assert entity_inside_2.id in found_ids
+        assert entity_outside.id not in found_ids
+
+    def test_find_in_radius_returns_empty_list_if_none_in_range(self, spatial_hash):
+        """Tests that an empty list is returned if no entities are in the radius."""
+        origin = np.array([50.0, 50.0])
+        entity_outside = MockEntity(30, 30)  # dist ~28.28
+        spatial_hash.add(entity_outside)
+
+        found_entities = spatial_hash.find_in_radius(origin, 10)
+        assert found_entities == []
+
+    def test_find_in_radius_on_empty_grid(self, spatial_hash):
+        """Tests that the method returns an empty list when the grid is empty."""
+        origin = np.array([50.0, 50.0])
+        found_entities = spatial_hash.find_in_radius(origin, 100)
+        assert found_entities == []

@@ -43,6 +43,7 @@ def mock_config():
                     "reproduction_cost": 20,
                     "reproduction_cooldown": 30,
                     "newborn_saturation_endowment": 20,
+                    "search_radius": 100.0,
                 }
             },
             "rice": {

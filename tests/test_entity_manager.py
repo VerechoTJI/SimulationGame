@@ -1,14 +1,14 @@
 # tests/test_entity_manager.py
 import pytest
 import numpy as np
-from unittest.mock import MagicMock, call
+from unittest.mock import MagicMock, call, patch
 
 from domain.spatial_hash import SpatialHash
 from domain.entity_manager import EntityManager
 from domain.entity import Entity
 from domain.human import Human
 from domain.rice import Rice
-from domain.sheep import Sheep  # Add new import
+from domain.sheep import Sheep
 
 
 @pytest.fixture
@@ -30,12 +30,9 @@ def entity_manager_with_mock_hash(mock_config):
     return manager
 
 
-# ... (All tests before TestEntityManagerFindNearest are unchanged) ...
+# ... (tests are unchanged until TestEntityManagerFindNearest) ...
 def test_initialization(entity_manager, mock_config):
-    """Tests that the EntityManager initializes its data structures correctly."""
     assert len(entity_manager.entities) == 0
-
-    # Check that pools and hashes were created for all entities in the config
     defined_entities = mock_config["entities"].keys()
     assert set(entity_manager.entity_pools.keys()) == set(defined_entities)
     assert set(entity_manager.spatial_hashes.keys()) == set(defined_entities)
@@ -43,36 +40,28 @@ def test_initialization(entity_manager, mock_config):
 
 
 def test_create_entity(entity_manager):
-    """Tests the generic create_entity method."""
     human = entity_manager.create_entity("human", pos_y=5, pos_x=6)
     assert isinstance(human, Human)
     assert len(entity_manager.entities) == 1
     assert entity_manager.entities[0] is human
-    assert human.position[0] == 55.0  # (5 + 0.5) * 10
-    assert human.position[1] == 65.0  # (6 + 0.5) * 10
+    assert human.position[0] == 55.0
+    assert human.position[1] == 65.0
 
 
 def test_create_entity_adds_to_spatial_hash(entity_manager_with_mock_hash):
-    """Tests that creating an entity correctly adds it to its spatial hash."""
     manager = entity_manager_with_mock_hash
     mock_hash = manager.spatial_hashes["rice"]
-
     rice = manager.create_entity("rice", pos_y=1, pos_x=2)
-
     mock_hash.add.assert_called_once_with(rice)
 
 
 def test_cleanup_removes_from_spatial_hash(entity_manager_with_mock_hash):
-    """Tests that cleaning up dead entities removes them from their spatial hash."""
     manager = entity_manager_with_mock_hash
     mock_hash = manager.spatial_hashes["rice"]
-
     rice = manager.create_entity("rice", pos_y=2, pos_x=2)
-    rice.is_eaten = True  # Mark for cleanup
+    rice.is_eaten = True
     mock_hash.reset_mock()
-
     removed = manager.cleanup_dead_entities()
-
     assert len(removed) == 1
     assert removed[0] is rice
     mock_hash.remove.assert_called_once_with(rice)
@@ -90,19 +79,14 @@ def test_cleanup_returns_removed_entities(entity_manager):
 
 
 def test_update_entity_position_calls_hash_update(entity_manager_with_mock_hash):
-    """Tests that the update method calls the correct spatial hash."""
     manager = entity_manager_with_mock_hash
     mock_human_hash = manager.spatial_hashes["human"]
     mock_rice_hash = manager.spatial_hashes["rice"]
-
     human = manager.create_entity("human", pos_y=1, pos_x=1)
     mock_human_hash.reset_mock()
-
     old_position = human.position.copy()
     new_position = np.array([55.0, 55.0])
-
     manager.update_entity_position(human, old_position, new_position)
-
     mock_human_hash.update.assert_called_once_with(human, old_position, new_position)
     mock_rice_hash.update.assert_not_called()
 
@@ -110,82 +94,77 @@ def test_update_entity_position_calls_hash_update(entity_manager_with_mock_hash)
 class TestEntityManagerFindNearest:
     @pytest.fixture
     def manager_for_find_test(self, mock_config):
-        """A special manager with a config that makes sense for proximity tests."""
-        # Use a deepcopy to avoid modifying the global mock_config
         import copy
 
         test_config = copy.deepcopy(mock_config)
-        # --- THIS IS THE KEY ---
-        # Make the world granular for this test so adjacent grid tiles are in adjacent cells
         test_config["simulation"]["tile_size_meters"] = 1
-        test_config["performance"]["spatial_hash_cell_size"] = 2
+        test_config["performance"]["spatial_hash_cell_size"] = 10
         return EntityManager(config_data=test_config, tile_size=1)
 
-    def test_find_nearest_entity_uses_spatial_hash(self, manager_for_find_test):
-        # This test is now much simpler to reason about.
-        manager = manager_for_find_test
-        # Rice A is at world (1.5, 1.5)
-        rice_A = manager.create_entity("rice", pos_y=1, pos_x=1)
-        # Rice B is at world (3.5, 3.5)
-        rice_B = manager.create_entity("rice", pos_y=3, pos_x=3)
-        # Origin is closer to B
-        origin_pos_yx = np.array([4.0, 4.0])
-
-        found = manager.find_nearest_entity_in_vicinity(origin_pos_yx, Rice)
-        assert found is not None
-        assert found.id == rice_B.id
-
-    def test_find_nearest_with_predicate(self, manager_for_find_test):
+    # --- THIS IS THE NEW, CRITICAL TEST ---
+    def test_find_closest_entity_in_radius_with_predicate(self, manager_for_find_test):
+        """
+        This is an INTEGRATION TEST. It ensures the manager correctly uses the
+        spatial hash to find a distant entity that satisfies a predicate, while
+        ignoring a closer one that does not.
+        """
         # ARRANGE
         manager = manager_for_find_test
-        # Origin is at (3.5, 3.5) -> Cell (1,1)
-        origin_pos_yx = np.array([3.5, 3.5])
+        origin = np.array([50.0, 50.0])
 
-        # Unmatured rice is at (3.5, 2.5) -> Cell (1,1). Close but fails predicate.
-        rice_unmatured = manager.create_entity("rice", pos_y=3, pos_x=2)
-        rice_unmatured.age = 1
+        # This rice is closer but immature, so it should be ignored by the predicate.
+        unmatured_rice = manager.create_entity("rice", pos_y=5, pos_x=5)
+        unmatured_rice.position = np.array([55.0, 55.0])  # distance ~7
+        unmatured_rice.age = 1
 
-        # Matured rice is at (5.5, 5.5) -> Cell (2,2). Further but passes predicate.
-        rice_matured = manager.create_entity("rice", pos_y=5, pos_x=5)
-        rice_matured.age = rice_matured.mature_age
+        # This rice is farther away but mature, so it should be found.
+        matured_rice = manager.create_entity("rice", pos_y=8, pos_x=8)
+        matured_rice.position = np.array([80.0, 80.0])  # distance ~42
+        matured_rice.age = matured_rice.mature_age
+
+        is_mature_predicate = lambda r: r.matured
 
         # ACT
-        found = manager.find_nearest_entity_in_vicinity(
-            origin_pos_yx, Rice, predicate=lambda r: r.matured
+        # Search in a radius large enough to see both.
+        found_entity = manager.find_closest_entity_in_radius(
+            origin_pos_yx=origin,
+            entity_type_class=Rice,
+            search_radius=100.0,
+            predicate=is_mature_predicate,
         )
 
         # ASSERT
-        assert found is not None, "A matured rice plant should have been found"
-        assert found.id == rice_matured.id, "The matured rice should be selected"
+        assert found_entity is not None, "A valid entity should have been found."
+        assert (
+            found_entity.id == matured_rice.id
+        ), "Should find the farther, but mature, rice."
 
-    def test_returns_none_if_no_matching_entity_found(self, entity_manager):
-        entity_manager.create_entity("human", pos_y=1, pos_x=1)
-        origin_pos_yx = np.array([5.0, 5.0])
-        found = entity_manager.find_nearest_entity_in_vicinity(origin_pos_yx, Rice)
-        assert found is None
+    def test_find_closest_entity_in_radius_calls_correct_spatial_hash(
+        self, entity_manager
+    ):
+        manager = entity_manager
+        origin_pos = np.array([50.0, 50.0])
+        search_radius = 100.0
+        with patch.object(
+            manager.spatial_hashes["rice"], "find_closest_in_radius", autospec=True
+        ) as mock_find:
+            mock_find.return_value = "fake_rice_entity"
+            result = manager.find_closest_entity_in_radius(
+                origin_pos_yx=origin_pos,
+                entity_type_class=Rice,
+                search_radius=search_radius,
+            )
+            mock_find.assert_called_once_with(origin_pos, search_radius)
+            assert result == "fake_rice_entity"
 
-    def test_returns_none_if_no_entities_in_spatial_hash_vicinity(self, entity_manager):
-        # ARRANGE
-        # Cell size is 10. Origin is at (5,5) in cell (0,0).
-        # Rice is at (55, 55) in cell (5,5), well outside the 3x3 search area.
-        entity_manager.create_entity("rice", pos_y=5, pos_x=5)
-        origin_pos_yx = np.array([5.0, 5.0])
 
-        # ACT
-        found = entity_manager.find_nearest_entity_in_vicinity(origin_pos_yx, Rice)
-
-        # ASSERT
-        assert found is None
-
-
+# ... (rest of the tests are unchanged) ...
 class TestEntityManagerObjectPooling:
     def test_dying_entity_is_returned_to_pool(self, entity_manager):
         human = entity_manager.create_entity("human", pos_y=5, pos_x=5)
         human_id = human.id
         human.saturation = 0
-
         entity_manager.cleanup_dead_entities()
-
         assert len(entity_manager.entities) == 0
         assert len(entity_manager.entity_pools["human"]._pool) == 1
         pooled_human = entity_manager.entity_pools["human"]._pool[0]
@@ -196,9 +175,7 @@ class TestEntityManagerObjectPooling:
         dead_human_id = human1.id
         human1.saturation = 0
         entity_manager.cleanup_dead_entities()
-
         human2 = entity_manager.create_entity("human", pos_y=1, pos_x=1)
-
         assert len(entity_manager.entities) == 1
         assert len(entity_manager.entity_pools["human"]._pool) == 0
         assert human2.id == dead_human_id
@@ -209,47 +186,34 @@ class TestEntityManagerObjectPooling:
         human_to_die.saturation = 0
         human_to_die_id = human_to_die.id
         entity_manager.cleanup_dead_entities()
-
         recycled_human = entity_manager.create_entity("human", pos_y=1, pos_x=2)
-
         assert recycled_human.id == human_to_die_id
         assert recycled_human.age == 0
         assert recycled_human.saturation == recycled_human.max_saturation
 
 
 def test_create_sheep_from_config(entity_manager, mock_config):
-    """
-    Tests that the EntityManager can initialize a sheep pool from config
-    and create a sheep entity.
-    """
-    # ARRANGE
-    # Ensure the 'sheep' config is present for this test
     if "sheep" not in mock_config["entities"]:
         mock_config["entities"]["sheep"] = {
             "attributes": {
-                "max_age": 1600,
-                "move_speed": 0.5,
-                "max_saturation": 80,
-                "hungry_threshold": 40,
-                "reproduction_threshold": 60,
-                "reproduction_cost": 15,
-                "reproduction_cooldown": 400,
-                "newborn_saturation_endowment": 15,
+                "max_age": 1,
+                "move_speed": 1,
+                "max_saturation": 1,
+                "hungry_threshold": 1,
+                "reproduction_threshold": 1,
+                "reproduction_cost": 1,
+                "reproduction_cooldown": 1,
+                "newborn_saturation_endowment": 1,
+                "search_radius": 1,
             }
         }
-
-    # Re-initialize the entity manager with the sheep config
     tile_size = mock_config["simulation"]["tile_size_meters"]
     manager = EntityManager(config_data=mock_config, tile_size=tile_size)
-
-    # ACT
     sheep = manager.create_entity("sheep", pos_y=10, pos_x=12)
-
-    # ASSERT
     assert "sheep" in manager.entity_pools
     assert "sheep" in manager.spatial_hashes
     assert isinstance(sheep, Sheep)
     assert len(manager.entities) == 1
     assert manager.entities[0] is sheep
-    assert sheep.position[0] == 105.0  # (10 + 0.5) * 10
-    assert sheep.position[1] == 125.0  # (12 + 0.5) * 10
+    assert sheep.position[0] == 105.0
+    assert sheep.position[1] == 125.0

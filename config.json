@@ -37,7 +37,8 @@
         "reproduction_threshold": 60,
         "reproduction_cost": 20,
         "reproduction_cooldown": 200,
-        "newborn_saturation_endowment": 20
+        "newborn_saturation_endowment": 20,
+        "search_radius": 50.0
       }
     },
     "rice": {

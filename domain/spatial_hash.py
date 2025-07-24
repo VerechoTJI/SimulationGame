@@ -1,6 +1,7 @@
 # domain/spatial_hash.py
 import numpy as np
 from collections import defaultdict
+import math
 
 
 class SpatialHash:
@@ -86,3 +87,58 @@ class SpatialHash:
                 nearby_entities.extend(self.grid.get(check_coords, []))
 
         return nearby_entities
+
+    def find_in_radius(self, origin_pos: np.ndarray, max_radius: float) -> list:
+        """
+        Finds all entities within a given radius from an origin point.
+        """
+        found_entities = []
+        max_radius_sq = max_radius**2
+
+        max_cell_dist = math.ceil(max_radius / self.cell_size)
+        center_coords = self._get_cell_coords(origin_pos)
+
+        for y_offset in range(-max_cell_dist, max_cell_dist + 1):
+            for x_offset in range(-max_cell_dist, max_cell_dist + 1):
+                check_coords = (
+                    center_coords[0] + y_offset,
+                    center_coords[1] + x_offset,
+                )
+
+                for entity in self.grid.get(check_coords, []):
+                    dist_sq = np.sum((entity.position - origin_pos) ** 2)
+                    if dist_sq < max_radius_sq:
+                        found_entities.append(entity)
+
+        return found_entities
+
+    def find_closest_in_radius(self, origin_pos: np.ndarray, max_radius: float):
+        """
+        Finds the single closest entity within a given radius from an origin point.
+
+        It performs an efficient search by only checking cells that could
+        possibly contain an entity within the radius. It uses squared distances
+        for performance, avoiding costly square root operations.
+        """
+        closest_entity = None
+        max_radius_sq = max_radius**2
+        min_dist_sq = max_radius_sq
+
+        max_cell_dist = math.ceil(max_radius / self.cell_size)
+        center_coords = self._get_cell_coords(origin_pos)
+
+        for y_offset in range(-max_cell_dist, max_cell_dist + 1):
+            for x_offset in range(-max_cell_dist, max_cell_dist + 1):
+                check_coords = (
+                    center_coords[0] + y_offset,
+                    center_coords[1] + x_offset,
+                )
+
+                for entity in self.grid.get(check_coords, []):
+                    dist_sq = np.sum((entity.position - origin_pos) ** 2)
+
+                    if dist_sq < min_dist_sq:
+                        min_dist_sq = dist_sq
+                        closest_entity = entity
+
+        return closest_entity
