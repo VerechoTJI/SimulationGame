@@ -107,7 +107,7 @@ class Sheep(Entity):
             return
 
         if self.is_hungry():
-            # Define a predicate to find only mature rice
+            # Define a predicate to find only mature rice in vicinity
             is_mature_rice = lambda rice: isinstance(rice, Rice) and rice.matured
 
             nearest_food = world.entity_manager.find_nearest_entity_in_vicinity(

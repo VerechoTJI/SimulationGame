@@ -1,4 +1,4 @@
-### **New Start Prompt v0.7**
+### **New Start Prompt v0.8**
 
 Hello! Your task is to continue the development of a Python command-line simulation game. The project follows Domain-Driven Design (DDD), Test-Driven Development (TDD), and Clean Architecture principles.
 
@@ -18,58 +18,60 @@ Hello! Your task is to continue the development of a Python command-line simulat
 - **World:** A grid-based map with Land, Water, and Mountain tiles affecting movement.
 - **Entities:**
   - `Human`: Navigates using a hybrid system: a centralized **Flow Field** for scalable food-seeking when hungry, and **A\*** for individual wandering when not. Has `saturation`, eats `Rice`, and reproduces.
+  - `Sheep`: **(New)** A simple animal that wanders using A\*, eats `Rice` when hungry (using a localized spatial hash search), and reproduces.
   - `Rice`: Matures over time and spawns naturally.
-  - **Optimization:** All entities are managed by a generic **Object Pooling** system (`domain/object_pool.py`) to reduce runtime overhead.
+  - **Optimization:** All entities are managed by a generic **Object Pooling** system to reduce runtime overhead. All entities are tracked by a **Spatial Hash** grid for fast, proximity-based lookups.
 
 **Project File Hierarchy & Explanations:**
 
-- `config.json`: Data file for all simulation parameters, including performance-tuning values.
+- `config.json`: **Data-driven core.** Defines all simulation parameters, including entity attributes and spawning rules.
 - `cli_main.py`: **Minimal entry point.** Sets up Python path, calls main run function.
 - `presentation/`: **Presentation Layer.**
   - `__init__.py`: Marks as a package.
   - `main.py`: Orchestrates the CLI app, initializes services, `shared_state`, and threads.
   - `input_handler.py`: Manages keyboard input, updates `keys_down`, and dispatches commands.
-  - `renderer.py`: Contains the `display` function responsible for drawing the entire game state to the terminal.
+  - `renderer.py`: Contains the `display` function responsible for drawing the entire game state to the terminal. Now handles rendering `Sheep`.
   - `game_loop.py`: Contains the primary `game_loop`. It handles smooth camera movement, drains the `command_queue` for logic commands, and controls the timed game tick.
 - `application/`: **Application Layer.**
   - `__init__.py`: Marks as a package.
   - `config.py`: Singleton for loading `config.json`.
-  - `game_service.py`: Exposes application use cases (e.g., `toggle_pause`). Orchestrates the domain layer and manages debug visualizations.
+  - `game_service.py`: Exposes application use cases (e.g., `toggle_pause`, `execute_user_command`). Catches domain errors and translates them into user-facing log messages. Orchestrates the domain layer and prepares render data.
 - `domain/`: **Domain Layer.**
   - `__init__.py`: Marks as a package.
   - `object_pool.py`: Generic `ObjectPool` and `PooledObjectMixin`.
   - `entity.py`: Base `Entity` class. `position` is a `numpy` array in `[y, x]` format.
   - `tile.py`: Defines `Tile` class and `TILES` dictionary.
-  - `pathfinder.py`: A\* pathfinding logic, used by `Human` entities for non-food-related wandering.
+  - `pathfinder.py`: A\* pathfinding logic, encapsulated in a `Pathfinder` class.
   - `flow_field_manager.py`: Generates vector fields using Dijkstra.
-  - `spatial_hash.py`: **(New)** A generic spatial hash grid for fast, proximity-based entity lookups. Configured with a cell size.
-  - `entity_manager.py`: Manages entity lifecycle and object pools. **Now contains a `SpatialHash` for `Rice` entities** to provide a fast, limited-range search for food.
-  - `spawning_manager.py`: Manages entity spawning rules.
-  - `human.py`: Logic for the `Human` entity. **Its eating logic now calls `EntityManager.find_nearest_entity_in_vicinity`**, removing a major performance bottleneck. Implements a hybrid movement model, switching between following the `World`'s flow field and using A\* for wandering.
+  - `spatial_hash.py`: A generic spatial hash grid for fast, proximity-based entity lookups. Configured with a cell size.
+  - `entity_manager.py`: **Heavily refactored.** Manages entity lifecycle and object pools dynamically based on `config.json`. It no longer has hardcoded logic for specific entities. It holds a dictionary of object pools and a dictionary of spatial hashes, one for each entity type defined in the config.
+  - `spawning_manager.py`: **Refactored.** Manages entity spawning rules. Now reads the `spawning` section of `config.json` to handle initial population of any entity type.
+  - `human.py`: Logic for the `Human` entity.
+  - `sheep.py`: **(New)** Logic for the `Sheep` entity. Includes a `reset()` method for object pool compatibility.
   - `rice.py`: Logic for the `Rice` entity.
-  - `world.py`: Central domain facade. Orchestrates the `game_tick`, delegating tasks to its managers.
+  - `world.py`: **Refactored.** Central domain facade. Now uses the refactored managers to populate the world and handle reproduction generically. Has a clean `spawn_entity` facade for application-layer commands.
 - `tests/`: **Testing Layer.**
   - `__init__.py`: Marks as a package.
-  - `conftest.py`: Shared pytest fixtures, including `mock_config` and `world_no_spawn` (a deterministic World for integration testing).
+  - `conftest.py`: Shared pytest fixtures. The `mock_config` now includes `sheep` attributes. The `world_no_spawn` fixture is updated to provide a truly empty world by overriding initial spawn counts, including `mock_config` and `world_no_spawn` (a deterministic World for integration testing).
   - `test_object_pool.py`: Unit tests for `ObjectPool`.
   - `test_pathfinder.py`: Unit tests for `Pathfinder`.
   - `test_flow_field_manager.py`: Unit tests for `FlowFieldManager`.
   - `test_spatial_hash.py`: **(New)** Unit tests verifying the `SpatialHash` component's logic (add, remove, find_nearby, update).
-  - `test_entity_manager.py`: Unit tests for `EntityManager`, now including tests for `SpatialHash` integration.
-  - `test_spawning_manager.py`: Unit tests for `SpawningManager`.
+  - `test_entity_manager.py`: **Heavily updated.** All tests refactored to validate the new data-driven `EntityManager` and its generic `create_entity` method.
+  - `test_spawning_manager.py`: Updated with tests for the generic initial spawning logic.
   - `test_human_logic.py`: Unit tests for `Human` logic. **Now mocks the `EntityManager`'s search method** to properly test the `Human` in isolation.
-  - `test_rice_logic.py`: Unit tests for `Rice` logic.
-  - `test_game_service.py`: Unit tests for `GameService`.
-  - `test_world_logic.py`: Integration tests for `World` logic.
-  - `test_domain_integration.py`: Crucial integration tests for the whole domain.
+  - `test_rice_logic.py`: Logic unit tests for entities.
+  - `test_sheep_logic.py`: **(New)** Comprehensive unit tests for all `Sheep` behaviors (movement, eating, reproduction).
+  - `test_game_service.py`: Unit tests for `GameService`, now testing the `execute_user_command` error handling.
+  - `test_world_logic.py`: **Updated.** Tests refactored to use the new `EntityManager` interface and to test the `world.spawn_entity` facade.
+  - `test_domain_integration.py`: **Updated.** Tests refactored to use the new `EntityManager` interface. Added a new smoke test to ensure all entity types can coexist in the world.
 
 **Recent Accomplishments & Key Learnings:**
 
-1.  **Performance Optimization via Spatial Hashing:** We identified that the `Human`'s method for finding `Rice` was a major performance bottleneck (O(N\*M) complexity). We explored options like Quadtrees and Spatial Hashing and chose the latter for its simplicity and performance with dynamic entities.
-2.  **Implementation of `SpatialHash`:** We used TDD to create a new, generic `domain/spatial_hash.py` component for fast proximity queries.
-3.  **Integration into `EntityManager`:** We integrated the `SpatialHash` into the `EntityManager` to exclusively track `Rice` entities. This provides a fast, **limited-range search**, which is both more performant and more realistic than a global search.
-4.  **Refactoring of `Human` Logic:** We refactored `domain/human.py` to replace its inefficient linear scan for food with a single, optimized call to `world.entity_manager.find_nearest_entity()`. This completed the performance enhancement.
-5.  **Future-Proofing & Intent:** The `EntityManager` has a public method, `update_entity_position`, which is fully unit-tested but **not yet called by any live simulation code**. This is intentional. Its purpose is to support future optimizations for _moving_ entities (like animals or other humans) without requiring a change to the `EntityManager`'s interface. When a moving entity is added to a spatial hash, its `tick()` method will become responsible for calling this function.
+1.  **Added `Sheep` Entity:** We successfully added a new, autonomous `Sheep` entity to the simulation, complete with wandering, eating, and reproduction logic, driven entirely by TDD.
+2.  **Data-Driven Entity Management:** In the process of adding `Sheep`, we refactored the `EntityManager` and `SpawningManager` away from hardcoded logic. They now dynamically configure themselves based _entirely_ on the contents of `config.json`. This makes adding future entities incredibly simple, often requiring only a config change and a new entity logic file.
+3.  **Refined Architectural Boundaries:** We had a critical learning moment where we initially placed application-level logic (user feedback/logging) inside the domain layer (`World`). We corrected this by having the domain layer raise an exception (`ValueError`) and letting the application layer (`GameService`) catch it and create the appropriate log message. This strictly enforces the Clean Architecture principle of keeping the domain pure.
+4.  **Robust Test-Driven Debugging:** We demonstrated the power of a comprehensive test suite. The tests correctly caught numerous regressions and inconsistencies introduced during our refactoring, including issues with object pool `reset` methods, outdated test assumptions, and subtle misconfigurations between test fixtures and production code. This validated our TDD approach.
 
 **IMPORTANT: Our Interaction Model**
 **Development Workflow:**
