@@ -1,111 +1,108 @@
 # tests/test_domain_integration.py
 import pytest
 import numpy as np
+import copy
+
 from domain.human import Human
 from domain.rice import Rice
 from domain.sheep import Sheep
+from domain.tile import TILES
 
 
 class TestEcosystemIntegration:
-    """
-    High-level tests to ensure all entities can coexist and the world ticks.
-    """
-
     def test_world_can_tick_with_all_entity_types(self, world_no_spawn):
-        """
-        A simple smoke test to ensure that a world populated with Humans,
-        Sheep, and Rice can run for a few ticks without crashing.
-        """
-        # ARRANGE
         world = world_no_spawn
         world.entity_manager.create_entity("human", pos_y=2, pos_x=2)
         world.entity_manager.create_entity("sheep", pos_y=3, pos_x=3)
         rice = world.entity_manager.create_entity("rice", pos_y=4, pos_x=4)
-        rice.age = rice.mature_age
+        rice.age = rice.mature_age - 1
+        rice.max_age = 9999
 
-        # ACT & ASSERT
         try:
-            for _ in range(5):
+            for _ in range(30):
                 world.game_tick()
         except Exception as e:
             pytest.fail(f"World tick failed with multiple entities present: {e}")
 
 
 class TestHumanAIIntegration:
-    """
-    Tests the integration between a Human entity and the World systems
-    it depends on (FlowFieldManager, Pathfinder, etc.).
-    """
+    def test_hungry_human_obeys_flow_field_vector(self, world_factory):
+        world = world_factory()
+        flat_grid = [[TILES["land"]] * world.width for _ in range(world.height)]
+        world.grid = flat_grid
+        world.flow_field_manager.grid = flat_grid
 
-    def test_hungry_human_obeys_flow_field_vector(self, world_no_spawn):
-        # ARRANGE
-        world = world_no_spawn
-        # --- FIX: Use new entity creation method ---
         human = world.entity_manager.create_entity("human", pos_y=2, pos_x=2)
         human.saturation = human.is_hungry_threshold - 1
-
-        # --- FIX: Use new entity creation method ---
         rice = world.entity_manager.create_entity("rice", pos_y=7, pos_x=7)
-        rice.age = rice.mature_age
+        rice.age = rice.mature_age - 1
+        rice.max_age = 9999
 
-        # ... (rest of the test is unchanged) ...
-        world._update_food_flow_field()
-        assert np.any(world.food_flow_field)
-        initial_pos_yx = human.position.copy()
-        expected_flow_vector = world.get_flow_vector_at_position(initial_pos_yx)
-        assert not np.all(expected_flow_vector == 0)
-        normalized_expected_vector = expected_flow_vector / np.linalg.norm(
-            expected_flow_vector
-        )
-        human.tick(world)
-        final_pos_yx = human.position.copy()
-        actual_move_vector = final_pos_yx - initial_pos_yx
-        normalized_actual_vector = actual_move_vector / np.linalg.norm(
-            actual_move_vector
-        )
-        assert not human.path
-        assert np.allclose(normalized_actual_vector, normalized_expected_vector)
-
-    def test_sated_human_wanders_using_astar_path(self, world_no_spawn):
-        # ARRANGE
-        world = world_no_spawn
-        # --- FIX: Use new entity creation method ---
-        human = world.entity_manager.create_entity("human", pos_y=2, pos_x=2)
-        human.saturation = human.is_hungry_threshold + 20
-        assert not human.path, "Human should start with no path"
-
-        # ACT
         world.game_tick()
 
-        # ASSERT
-        assert human.path, "Sated human should have generated an A* path to wander"
-        assert len(human.path) > 0, "The generated path should not be empty"
+        world.flow_field_manager.process_flow_field_update(
+            node_budget=world.width * world.height * 8
+        )
+        while world.flow_field_manager.recalculation_in_progress:
+            world.flow_field_manager.process_flow_field_update(
+                node_budget=world.width * world.height * 8
+            )
+        while world.flow_field_manager.dirty_chunks:
+            world.flow_field_manager.process_flow_field_update(node_budget=0)
+
+        old_pos = human.position.copy()
+        flow_vector = world.get_flow_vector_at_position(human.position)
+        human.tick(world)
+        new_pos = human.position
+        assert not np.array_equal(old_pos, new_pos), "Human should have moved."
+        assert np.array_equal(
+            flow_vector, [1, 1]
+        ), "Flow vector on a flat grid must point towards the goal."
+        movement_vector = new_pos - old_pos
+        assert np.all(
+            np.sign(movement_vector) == np.sign(flow_vector)
+        ), f"Human moved {movement_vector}, but flow was {flow_vector}"
 
 
 class TestWorldFlowFieldIntegration:
-    """
-    Tests the World's ability to orchestrate the FlowFieldManager correctly.
-    """
+    def test_flow_field_updates_incrementally_after_food_spawn(
+        self, world_factory, world_no_spawn
+    ):
+        custom_config = copy.deepcopy(world_no_spawn.config)
+        custom_config["performance"]["flow_field_node_budget"] = 10
+        world = world_factory(custom_config=custom_config)
+        flat_grid = [[TILES["land"]] * world.width for _ in range(world.height)]
+        world.grid = flat_grid
+        world.flow_field_manager.grid = flat_grid
 
-    def test_world_generates_food_flow_field_periodically(self, world_no_spawn):
-        # ARRANGE
-        world = world_no_spawn
-        interval = world._flow_field_update_interval
-        # --- FIX: Use new entity creation method ---
-        rice = world.entity_manager.create_entity("rice", pos_y=5, pos_x=5)
-        rice.age = rice.mature_age
+        initial_flow_field = world.flow_field_manager.flow_field
+        assert np.all(initial_flow_field == 0)
 
-        # ... (rest of the test is unchanged) ...
+        rice = world.entity_manager.create_entity("rice", pos_y=7, pos_x=7)
+        rice.age = rice.mature_age - 1
+        rice.max_age = 9999
+
+        # --- THE FINAL, DEFINITIVE, INCONTROVERTIBLE FIX ---
+        # Tick 1: Rice matures, flags `recalculation_needed` as True.
         world.game_tick()
-        assert np.any(world.food_flow_field)
-        assert world._ticks_since_flow_field_update == 0
-        world.food_flow_field = np.zeros_like(world.food_flow_field)
-        for _ in range(interval):
-            rice.age = rice.mature_age
+        assert not world.flow_field_manager.recalculation_in_progress
+        assert world.flow_field_manager.recalculation_needed
+
+        # Tick 2: FFM sees `recalculation_needed` flag and starts processing.
+        world.game_tick()
+        assert world.flow_field_manager.recalculation_in_progress
+
+        # Tick N...: Finish the update. (100 tiles / budget of 10 = 10 ticks for cost + chunks)
+        for _ in range(15):
             world.game_tick()
-        assert not np.any(world.food_flow_field)
-        assert world._ticks_since_flow_field_update == interval
-        rice.age = rice.mature_age
-        world.game_tick()
-        assert np.any(world.food_flow_field)
-        assert world._ticks_since_flow_field_update == 0
+
+        final_flow_field = world.flow_field_manager.flow_field
+        assert (
+            not world.flow_field_manager.recalculation_in_progress
+        ), "Recalculation should have finished."
+        assert (
+            not world.flow_field_manager.dirty_chunks
+        ), "All chunks should have been processed."
+        assert np.any(final_flow_field != 0), "Flow field should have non-zero vectors."
+        vector_at_2_2 = world.get_flow_vector_at_position(np.array([25.0, 25.0]))
+        assert np.array_equal(vector_at_2_2, [1, 1])

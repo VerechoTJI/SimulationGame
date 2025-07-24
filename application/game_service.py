@@ -80,20 +80,13 @@ class GameService:
         if command == "sp" and len(parts) == 4:
             try:
                 entity_type = parts[1]
-                # --- NOTE: The user provides (x, y), we use (y, x) internally ---
                 x = int(parts[2])
                 y = int(parts[3])
-
-                # --- THIS IS THE ARCHITECTURAL FIX ---
-                # 1. Call the domain method
                 self.world.spawn_entity(entity_type, y, x)
-                # 2. On success, the Application layer logs it
                 self.world.add_log(
                     f"{Colors.GREEN}Successfully spawned a {entity_type} at ({y}, {x}).{Colors.RESET}"
                 )
-
             except ValueError as e:
-                # 3. On failure, the Application layer catches the domain error and logs it
                 self.world.add_log(f"{Colors.RED}Command failed: {e}{Colors.RESET}")
             except IndexError:
                 self.world.add_log(
@@ -118,7 +111,7 @@ class GameService:
         ]
 
         human_statuses = []
-        sheep_statuses = []  # Add a list for sheep
+        sheep_statuses = []
         for entity in self.world.entity_manager.entities:
             grid_y = int(entity.position[0] / self.world.tile_size_meters)
             grid_x = int(entity.position[1] / self.world.tile_size_meters)
@@ -131,7 +124,6 @@ class GameService:
                         f"{color}{entity.name:<10s}{Colors.RESET}"
                         f" Sat: {entity.saturation:>3}/{entity.max_saturation}"
                     )
-                # --- NEW: Handle Sheep ---
                 elif isinstance(entity, Sheep):
                     color = Colors.CYAN if not entity.is_hungry() else Colors.BLUE
                     sheep_statuses.append(
@@ -151,12 +143,14 @@ class GameService:
             "logs": self.world.log_messages,
             "colors": Colors,
             "human_statuses": human_statuses,
-            "sheep_statuses": sheep_statuses,  # Add sheep statuses to payload
+            "sheep_statuses": sheep_statuses,
             "is_paused": self._is_paused,
             "tick_seconds": self._tick_seconds,
             "base_tick_seconds": self._base_tick_seconds,
             "show_flow_field": self._show_flow_field,
         }
         if self._show_flow_field:
-            render_payload["flow_field_data"] = self.world.food_flow_field
+            # --- CORRECTED ACCESSOR ---
+            # The flow field data is now accessed from the manager within the world.
+            render_payload["flow_field_data"] = self.world.flow_field_manager.flow_field
         return render_payload

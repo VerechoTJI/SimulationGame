@@ -1,12 +1,15 @@
 # domain/entity_manager.py
 import numpy as np
-import inspect  # <-- Import the inspect module
+import inspect
 from .entity import Entity
 from .human import Human
 from .rice import Rice
 from .sheep import Sheep
 from .object_pool import ObjectPool
 from .spatial_hash import SpatialHash
+
+# Import FlowFieldManager for type hinting
+from .flow_field_manager import FlowFieldManager
 
 
 class EntityManager:
@@ -22,6 +25,7 @@ class EntityManager:
         self.config = config_data
         self.tile_size_meters = tile_size
         self.entities = []
+        self.flow_field_manager: FlowFieldManager = None  # Will be set by World
 
         self.entity_pools = {}
         self.spatial_hashes = {}
@@ -38,9 +42,7 @@ class EntityManager:
             if entity_type_str in entity_configs:
                 attrs = self._get_config("entities", entity_type_str, "attributes")
 
-                # --- REFACTORED FACTORY ---
                 def factory(cls=entity_class, initial_attrs=attrs):
-                    # Filter attributes to match only what the class __init__ expects
                     filtered_attrs = self._filter_kwargs(cls.__init__, initial_attrs)
                     return cls(0, 0, **filtered_attrs)
 
@@ -48,13 +50,8 @@ class EntityManager:
                 self.spatial_hashes[entity_type_str] = SpatialHash(cell_size=cell_size)
 
     def _filter_kwargs(self, method, all_kwargs: dict) -> dict:
-        """
-        Inspects a method's signature and returns a dict containing only the
-        kwargs that the method accepts.
-        """
         sig = inspect.signature(method)
         accepted_keys = {p.name for p in sig.parameters.values()}
-
         filtered = {
             key: value for key, value in all_kwargs.items() if key in accepted_keys
         }
@@ -79,28 +76,18 @@ class EntityManager:
         world_pos_y = (pos_y + 0.5) * self.tile_size_meters
 
         config_attrs = self._get_config("entities", entity_type, "attributes")
-
-        # Get the pool for the entity type
         pool = self.entity_pools[entity_type]
-
-        # --- REFACTORED POOL INTERACTION ---
-        # We need the class to inspect its reset method
         entity_class = self.ENTITY_TYPE_MAP[entity_type]
-
-        # Filter the attributes to match what the entity's reset method accepts
         reset_attrs = self._filter_kwargs(entity_class.reset, config_attrs)
-
-        # The pool's get() method will call the object's reset() method.
-        # We pass the filtered attributes along with position.
         entity = pool.get(pos_y=world_pos_y, pos_x=world_pos_x, **reset_attrs)
 
-        # Apply any override kwargs passed directly to create_entity
         for key, value in kwargs.items():
             if hasattr(entity, key):
                 setattr(entity, key, value)
 
         self.entities.append(entity)
         self.spatial_hashes[entity_type].add(entity)
+
         return entity
 
     def update_entity_position(
@@ -120,6 +107,16 @@ class EntityManager:
                 entity_type_str = entity.name.split("_")[0].lower()
                 if entity_type_str in self.spatial_hashes:
                     self.spatial_hashes[entity_type_str].remove(entity)
+
+                # --- NEW LOGIC ---
+                # If it was a food source, notify the flow field manager.
+                if isinstance(entity, Rice):
+                    if self.flow_field_manager:
+                        # Convert world position back to grid position for the goal
+                        grid_y = int(entity.position[0] / self.tile_size_meters)
+                        grid_x = int(entity.position[1] / self.tile_size_meters)
+                        self.flow_field_manager.remove_goal((grid_y, grid_x))
+
                 entity.release()
         return removed_entities
 

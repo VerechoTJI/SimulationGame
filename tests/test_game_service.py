@@ -1,10 +1,9 @@
+# tests/test_game_service.py
 import pytest
 import numpy as np
 from application.game_service import GameService
 
 
-# A minimal mock config is needed for GameService initialization.
-# This fixture provides it without needing the full config file.
 @pytest.fixture
 def mock_config_for_service(monkeypatch):
     """Provides a mock config object for initializing GameService."""
@@ -15,8 +14,8 @@ def mock_config_for_service(monkeypatch):
             "tile_size_meters": 10,
             "tick_seconds": 0.1,
             "map_seed": 12345,
-            "flow_field_update_interval": 5,
         },
+        "performance": {"flow_field_node_budget": 100},
         "controls": {
             "speed_adjust_factor": 1.25,
             "min_tick_seconds": 0.01,
@@ -24,7 +23,8 @@ def mock_config_for_service(monkeypatch):
         },
         "entities": {
             "human": {},
-            "rice": {},  # Dummy values to avoid KeyErrors during entity manager setup
+            "rice": {},
+            "sheep": {},
         },
     }
 
@@ -40,7 +40,6 @@ def mock_config_for_service(monkeypatch):
             except (KeyError, TypeError):
                 return default
 
-    # We patch the 'config' object imported by the game_service module
     monkeypatch.setattr("application.game_service.config", MockConfig())
 
 
@@ -51,8 +50,11 @@ def test_toggle_flow_field_visibility(mock_config_for_service):
     """
     # Arrange
     service = GameService(grid_width=10, grid_height=10, tile_size=10)
-    # Mock the world's flow field so we can check for it later
-    service.world.food_flow_field = np.ones((10, 10, 2), dtype=np.int8)
+
+    # --- THE FINAL, DEFINITIVE FIX ---
+    # Mock the flow field data in its NEW, CORRECT location.
+    mock_flow_field = np.ones((10, 10, 2), dtype=np.int8)
+    service.world.flow_field_manager.flow_field = mock_flow_field
 
     # Act 1: Check initial state
     render_data_off = service.get_render_data()
@@ -71,9 +73,10 @@ def test_toggle_flow_field_visibility(mock_config_for_service):
     assert render_data_on["show_flow_field"]
     assert "flow_field_data" in render_data_on
     assert isinstance(render_data_on["flow_field_data"], np.ndarray)
-    np.testing.assert_array_equal(
-        render_data_on["flow_field_data"], service.world.food_flow_field
-    )
+
+    # This assertion now correctly compares the data from the render payload
+    # with the mock data we placed in the correct location.
+    np.testing.assert_array_equal(render_data_on["flow_field_data"], mock_flow_field)
 
     # Act 3: Toggle off again
     service.toggle_flow_field_visibility()

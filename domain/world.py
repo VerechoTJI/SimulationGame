@@ -26,20 +26,16 @@ class World:
         self.log_messages = []
 
         self.pathfinder = Pathfinder(self.grid)
-        self.entity_manager = EntityManager(config_data, self.tile_size_meters)
-        self.spawning_manager = SpawningManager(self.grid, self.config)
-        self.flow_field_manager = FlowFieldManager(self.grid)
-
-        self.food_flow_field = np.zeros((self.height, self.width, 2), dtype=np.int8)
-        self._flow_field_update_interval = self._get_config(
-            "simulation", "flow_field_update_interval", default=100
+        self.flow_field_manager = FlowFieldManager(
+            self.grid, chunk_size=config_data["performance"]["chunk_size"]
         )
-        self._ticks_since_flow_field_update = self._flow_field_update_interval
+        self.entity_manager = EntityManager(config_data, self.tile_size_meters)
+        self.entity_manager.flow_field_manager = self.flow_field_manager
+        self.spawning_manager = SpawningManager(self.grid, self.config)
 
         self.populate_initial_entities()
 
     def populate_initial_entities(self):
-        """Populates the world with initial entities based on config."""
         initial_spawns = self.spawning_manager.get_initial_spawn_locations()
         for entity_type, (pos_y, pos_x) in initial_spawns:
             try:
@@ -47,36 +43,48 @@ class World:
             except ValueError as e:
                 self.add_log(f"{Colors.RED}Config Error: {e}{Colors.RESET}")
 
-        self.add_log(f"Spawned {len(initial_spawns)} initial entities.")
+        # We must call tick() on all entities once to ensure any day-zero state
+        # changes (like maturation) are processed before the first real tick.
+        for entity in self.entity_manager.entities:
+            entity.tick(self)
+
+        # --- THE FINAL FIX ---
+        # Check the new, correct flag from the double-buffered FFM.
+        if self.flow_field_manager.recalculation_needed:
+            # Use the FFM's own synchronous generation method for initialization.
+            self.flow_field_manager.generate_flow_field(
+                list(self.flow_field_manager.goal_positions)
+            )
+            self.add_log(
+                f"{Colors.BLUE}Initial food flow field calculated.{Colors.RESET}"
+            )
+        else:
+            self.add_log(f"Spawned {len(initial_spawns)} initial entities (no food).")
 
     def spawn_entity(self, entity_type: str, pos_y: int, pos_x: int):
-        """
-        Public facade to create an entity. Raises ValueError on unknown type.
-        This is a pure domain operation, no logging.
-        """
-        # Let ValueError from create_entity propagate up to the application layer.
         self.entity_manager.create_entity(entity_type.lower(), pos_y, pos_x)
 
     def game_tick(self):
         self.tick_count += 1
+
+        # 1. System Updates
+        flow_field_budget = self._get_config(
+            "performance", "flow_field_node_budget", default=100
+        )
+        self.flow_field_manager.process_flow_field_update(node_budget=flow_field_budget)
+
+        # 2. Entity Actions
         entities_to_process = list(self.entity_manager.entities)
+        for entity in entities_to_process:
+            if entity.is_alive():
+                entity.tick(self)
 
-        if self._ticks_since_flow_field_update >= self._flow_field_update_interval:
-            self._ticks_since_flow_field_update = 0
-            self._update_food_flow_field()
-        else:
-            self._ticks_since_flow_field_update += 1
-
+        # 3. World State Changes (Spawning/Reproduction)
         occupied_tiles = {
             self.get_grid_position(e.position) for e in self.entity_manager.entities
         }
-
-        # --- FIX: Use generic create_entity ---
         for pos_y, pos_x in self.spawning_manager.process_replant_queue():
             self.entity_manager.create_entity("rice", pos_y, pos_x)
-            self.add_log(
-                f"{Colors.GREEN}A Rice plant was replanted at ({pos_y}, {pos_x}).{Colors.RESET}"
-            )
 
         natural_spawn_coord = self.spawning_manager.get_natural_rice_spawn_location(
             occupied_tiles
@@ -84,18 +92,8 @@ class World:
         if natural_spawn_coord:
             pos_y, pos_x = natural_spawn_coord
             self.entity_manager.create_entity("rice", pos_y, pos_x)
-            self.add_log(
-                f"{Colors.GREEN}A new Rice plant sprouted at ({pos_y}, {pos_x}).{Colors.RESET}"
-            )
 
-        for entity in entities_to_process:
-            if entity.is_alive():
-                entity.tick(self)
-
-        newly_born_entities = []
-        for entity in list(
-            self.entity_manager.entities
-        ):  # Use a copy as the list might grow
+        for entity in list(self.entity_manager.entities):
             if hasattr(entity, "can_reproduce") and entity.can_reproduce():
                 parent_grid_pos_yx = self.get_grid_position(entity.position)
                 current_occupied = {
@@ -109,17 +107,14 @@ class World:
                     entity_type_str = entity.name.split("_")[0].lower()
                     newborn_saturation = entity.reproduce()
                     spawn_y, spawn_x = spawn_pos_yx
-                    newborn = self.entity_manager.create_entity(
+                    self.entity_manager.create_entity(
                         entity_type_str,
                         spawn_y,
                         spawn_x,
-                        saturation=newborn_saturation,  # Changed 'initial_saturation' to 'saturation'
+                        saturation=newborn_saturation,
                     )
-                    self.add_log(
-                        f"{Colors.MAGENTA}{entity.name} has given birth to {newborn.name}!{Colors.RESET}"
-                    )
-                    newly_born_entities.append(newborn)
 
+        # 4. Cleanup
         removed_entities = self.entity_manager.cleanup_dead_entities()
         for entity in removed_entities:
             if hasattr(entity, "is_eaten") and entity.is_eaten:
@@ -157,7 +152,6 @@ class World:
         return world_map
 
     def get_tile_at_pos(self, pos_y, pos_x):
-        """Gets tile using (y, x) world coordinates."""
         grid_y = int(pos_y / self.tile_size_meters)
         grid_x = int(pos_x / self.tile_size_meters)
         grid_y = np.clip(grid_y, 0, self.height - 1)
@@ -165,11 +159,9 @@ class World:
         return self.grid[grid_y][grid_x]
 
     def find_path(self, start_pos_yx, end_pos_yx):
-        """Delegates pathfinding to the Pathfinder service using (y, x) tuples."""
         return self.pathfinder.find_path(start_pos_yx, end_pos_yx)
 
     def get_grid_position(self, world_position_yx):
-        """Converts world position [y, x] to grid tuple (y, x)."""
         grid_y = int(world_position_yx[0] / self.tile_size_meters)
         grid_x = int(world_position_yx[1] / self.tile_size_meters)
         grid_y = np.clip(grid_y, 0, self.height - 1)
@@ -185,19 +177,6 @@ class World:
         except (KeyError, TypeError):
             return default
 
-    def _update_food_flow_field(self):
-        """Finds all mature rice and regenerates the food flow field using (y, x)."""
-        food_sources_yx = [
-            self.get_grid_position(e.position)
-            for e in self.entity_manager.entities
-            if isinstance(e, Rice) and e.matured
-        ]
-        self.food_flow_field = self.flow_field_manager.generate_flow_field(
-            food_sources_yx
-        )
-        self.add_log(f"{Colors.BLUE}Food flow field recalculated.{Colors.RESET}")
-
     def get_flow_vector_at_position(self, world_position_yx):
-        """Gets the flow vector at a world position using (y, x) format."""
         grid_y, grid_x = self.get_grid_position(world_position_yx)
-        return self.food_flow_field[grid_y, grid_x]
+        return self.flow_field_manager.flow_field[grid_y, grid_x]

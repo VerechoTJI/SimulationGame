@@ -29,9 +29,22 @@ class Rice(Entity):
         return super().is_alive() and not self.is_eaten
 
     def tick(self, world):
-        super().tick(world)
+        # Store maturity state *before* the tick increments the age
+        was_matured_before_tick = self.matured
+
+        super().tick(world)  # This increments self.age
+
         if self.is_alive():
-            self.symbol = "R" if self.matured else "r"
+            is_matured_after_tick = self.matured
+
+            # --- NEW STATE TRANSITION LOGIC ---
+            # If it just became mature on this tick, it must announce itself as a new goal.
+            if is_matured_after_tick and not was_matured_before_tick:
+                grid_pos = world.get_grid_position(self.position)
+                world.flow_field_manager.add_goal(grid_pos)
+
+            # Update symbol based on current state
+            self.symbol = "R" if is_matured_after_tick else "r"
 
     def get_eaten(self):
         """Marks the rice as eaten, flagging it for removal and pooling."""

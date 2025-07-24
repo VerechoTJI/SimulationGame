@@ -1,7 +1,7 @@
 # tests/test_world_logic.py
 import pytest
 import numpy as np
-
+from unittest.mock import patch
 from domain.human import Human
 
 
@@ -9,6 +9,30 @@ from domain.human import Human
 def world_instance(world_factory):
     """Provides a real, but blank, World instance."""
     return world_factory(width=10, height=10)
+
+
+def test_game_tick_processes_flow_field(world_no_spawn):
+    """
+    Tests that the world's game_tick calls the flow field manager's
+    update process on every tick.
+    """
+    # ARRANGE
+    world = world_no_spawn
+    # Patch the manager instance on the world object
+    with patch.object(
+        world.flow_field_manager, "process_flow_field_update", autospec=True
+    ) as mock_update:
+        # ACT
+        world.game_tick()
+
+        # ASSERT
+        mock_update.assert_called_once()
+
+        # ACT 2
+        world.game_tick()
+
+        # ASSERT 2
+        assert mock_update.call_count == 2
 
 
 class TestWorldCommands:

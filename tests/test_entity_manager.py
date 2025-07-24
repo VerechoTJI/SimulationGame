@@ -13,24 +13,62 @@ from domain.sheep import Sheep
 
 @pytest.fixture
 def entity_manager(mock_config):
-    """Provides a standard EntityManager initialized with the full mock config."""
     tile_size = mock_config["simulation"]["tile_size_meters"]
     return EntityManager(config_data=mock_config, tile_size=tile_size)
 
 
 @pytest.fixture
 def entity_manager_with_mock_hash(mock_config):
-    """Provides an EntityManager with mocked SpatialHash objects."""
     tile_size = mock_config["simulation"]["tile_size_meters"]
     manager = EntityManager(config_data=mock_config, tile_size=tile_size)
-    # Replace the real spatial hashes with mocks
     manager.spatial_hashes["human"] = MagicMock(spec=SpatialHash)
     manager.spatial_hashes["rice"] = MagicMock(spec=SpatialHash)
     manager.spatial_hashes["sheep"] = MagicMock(spec=SpatialHash)
     return manager
 
 
-# ... (tests are unchanged until TestEntityManagerFindNearest) ...
+# --- CORRECTED TESTS FOR FLOW FIELD NOTIFICATION ---
+
+
+def test_create_rice_does_not_notify_flow_field_manager(mock_config):
+    """
+    Tests that creating a Rice entity does NOT notify the FlowFieldManager.
+    This responsibility was moved to the Rice entity's tick() method.
+    """
+    # ARRANGE
+    tile_size = mock_config["simulation"]["tile_size_meters"]
+    manager = EntityManager(config_data=mock_config, tile_size=tile_size)
+    mock_ffm = MagicMock()
+    manager.flow_field_manager = mock_ffm
+
+    # ACT
+    manager.create_entity("rice", pos_y=3, pos_x=7)
+
+    # ASSERT
+    mock_ffm.add_goal.assert_not_called()
+
+
+def test_cleanup_dead_rice_notifies_flow_field_manager(mock_config):
+    """
+    Tests that cleaning up a dead Rice entity correctly calls remove_goal on
+    the FlowFieldManager, as this is the EntityManager's responsibility.
+    """
+    # ARRANGE
+    tile_size = mock_config["simulation"]["tile_size_meters"]
+    manager = EntityManager(config_data=mock_config, tile_size=tile_size)
+    mock_ffm = MagicMock()
+    manager.flow_field_manager = mock_ffm
+
+    rice_plant = manager.create_entity("rice", pos_y=3, pos_x=7)
+    rice_plant.is_eaten = True  # Mark it for cleanup
+
+    # ACT
+    manager.cleanup_dead_entities()
+
+    # ASSERT
+    mock_ffm.remove_goal.assert_called_once_with((3, 7))
+
+
 def test_initialization(entity_manager, mock_config):
     assert len(entity_manager.entities) == 0
     defined_entities = mock_config["entities"].keys()
@@ -101,39 +139,22 @@ class TestEntityManagerFindNearest:
         test_config["performance"]["spatial_hash_cell_size"] = 10
         return EntityManager(config_data=test_config, tile_size=1)
 
-    # --- THIS IS THE NEW, CRITICAL TEST ---
     def test_find_closest_entity_in_radius_with_predicate(self, manager_for_find_test):
-        """
-        This is an INTEGRATION TEST. It ensures the manager correctly uses the
-        spatial hash to find a distant entity that satisfies a predicate, while
-        ignoring a closer one that does not.
-        """
-        # ARRANGE
         manager = manager_for_find_test
         origin = np.array([50.0, 50.0])
-
-        # This rice is closer but immature, so it should be ignored by the predicate.
         unmatured_rice = manager.create_entity("rice", pos_y=5, pos_x=5)
-        unmatured_rice.position = np.array([55.0, 55.0])  # distance ~7
+        unmatured_rice.position = np.array([55.0, 55.0])
         unmatured_rice.age = 1
-
-        # This rice is farther away but mature, so it should be found.
         matured_rice = manager.create_entity("rice", pos_y=8, pos_x=8)
-        matured_rice.position = np.array([80.0, 80.0])  # distance ~42
+        matured_rice.position = np.array([80.0, 80.0])
         matured_rice.age = matured_rice.mature_age
-
         is_mature_predicate = lambda r: r.matured
-
-        # ACT
-        # Search in a radius large enough to see both.
         found_entity = manager.find_closest_entity_in_radius(
             origin_pos_yx=origin,
             entity_type_class=Rice,
             search_radius=100.0,
             predicate=is_mature_predicate,
         )
-
-        # ASSERT
         assert found_entity is not None, "A valid entity should have been found."
         assert (
             found_entity.id == matured_rice.id
@@ -158,7 +179,6 @@ class TestEntityManagerFindNearest:
             assert result == "fake_rice_entity"
 
 
-# ... (rest of the tests are unchanged) ...
 class TestEntityManagerObjectPooling:
     def test_dying_entity_is_returned_to_pool(self, entity_manager):
         human = entity_manager.create_entity("human", pos_y=5, pos_x=5)
