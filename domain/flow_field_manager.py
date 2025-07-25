@@ -173,7 +173,7 @@ class FlowFieldManager:
                         best_move = (dy, dx)
                 self.flow_field[y, x] = best_move
 
-    def process_flow_field_update(self, node_budget: int = 100):
+    def process_flow_field_update(self, node_budget: int = 256, chunk_budget=16):
         """
         The main update function. It can process BOTH the background cost field
         and the foreground vector field in the same tick.
@@ -189,7 +189,10 @@ class FlowFieldManager:
         # 2. Independently, update one chunk of the vector field.
         # This is non-blocking because it reads from the stable active_cost_field.
         if self.dirty_chunks:
-            self._process_one_dirty_chunk_vectors()
+            counter = 0
+            while len(self.dirty_chunks) > 0 and counter < chunk_budget:
+                self._process_one_dirty_chunk_vectors()
+                counter += 1
 
     # generate_flow_field can be removed or left for legacy tests, but is not part of the main logic.
     def generate_flow_field(

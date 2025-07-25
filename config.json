@@ -9,7 +9,8 @@
   "performance": {
     "spatial_hash_cell_size": 2,
     "chunk_size": 16,
-    "flow_field_node_budget": 512
+    "flow_field_node_budget": 256,
+    "flow_field_chunk_budget": 16
   },
   "controls": {
     "speed_adjust_factor": 2,

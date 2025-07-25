@@ -69,9 +69,14 @@ class World:
 
         # 1. System Updates
         flow_field_budget = self._get_config(
-            "performance", "flow_field_node_budget", default=100
+            "performance", "flow_field_node_budget", default=256
         )
-        self.flow_field_manager.process_flow_field_update(node_budget=flow_field_budget)
+        chunk_budget = self._get_config(
+            "performance", "flow_field_chunk_budget", default=16
+        )
+        self.flow_field_manager.process_flow_field_update(
+            node_budget=flow_field_budget, chunk_budget=chunk_budget
+        )
 
         # 2. Entity Actions
         entities_to_process = list(self.entity_manager.entities)
